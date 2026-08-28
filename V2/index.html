@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>BoxDrop v2</title>
+  <title>BoxDrop v2 - Final Pathing Physics</title>
   
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -214,12 +214,12 @@
     <canvas id="gameCanvas"></canvas>
   </div>
 
-  <div id="hint-bar">Tap column to preview • Double tap to drop</div>
+  <div id="hint-bar">Tap empty pocket to route • Double tap to lock</div>
 
   <div id="menu-modal" class="modal">
     <div class="modal-card">
       <h1>BOXDROP</h1>
-      <p class="subtitle">Complete enclosed squares using Red, Blue, Green, and Wildcard White segments.<br><br>Tap to route • Double tap to drop.</p>
+      <p class="subtitle">Complete enclosed squares. Pieces can be routed under overhangs via legal paths.<br><br>Tap pocket to route • Double tap to lock.</p>
       <button class="start-btn" id="start-btn">PLAY</button>
     </div>
   </div>
@@ -286,13 +286,6 @@
         gain.gain.setValueAtTime(0.1, now);
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
         osc.start(now); osc.stop(now + 0.3);
-      } else if (type === 'gameover') {
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(220, now);
-        osc.frequency.exponentialRampToValueAtTime(40, now + 0.4);
-        gain.gain.setValueAtTime(0.2, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
-        osc.start(now); osc.stop(now + 0.4);
       }
     } catch(e) {}
   }
@@ -307,9 +300,11 @@
 
   let currentPiece = null;
   let nextPiece = null;
+  let ghostPos = null;
   let clearingAnimation = null;
+  
   let lastTapTime = 0;
-  let lastTapTarget = -1;
+  let lastTapKey = "";
 
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
@@ -322,11 +317,22 @@
   let originY = 20;
 
   function initGrid() {
-    hEdges = Array.from({ length: GRID_ROWS }, () => Array(GRID_COLS - 1).fill(null));
-    vEdges = Array.from({ length: GRID_ROWS - 1 }, () => Array(GRID_COLS).fill(null));
+    hEdges = [];
+    vEdges = [];
+    
+    // Arrays sized to support -1 and GRID_COLS for boundary checking and drawing
+    for (let r = 0; r < GRID_ROWS; r++) {
+      hEdges[r] = [];
+      for (let c = -1; c <= GRID_COLS; c++) hEdges[r][c] = null;
+    }
+    for (let r = 0; r < GRID_ROWS - 1; r++) {
+      vEdges[r] = [];
+      for (let c = -1; c <= GRID_COLS + 1; c++) vEdges[r][c] = null;
+    }
+
     clearingAnimation = null;
 
-    // Seed bottom 4 rows with wildcard white segments
+    // Seed bottom rows with wildcard white segments
     for (let r = GRID_ROWS - 4; r < GRID_ROWS; r++) {
       for (let c = 0; c < GRID_COLS - 1; c++) {
         if (Math.random() < 0.42) hEdges[r][c] = 'white';
@@ -358,59 +364,127 @@
     const isH = Math.random() > 0.5;
     const color = GAME_COLORS[Math.floor(Math.random() * GAME_COLORS.length)];
     const maxCol = isH ? (GRID_COLS - 2) : (GRID_COLS - 1);
-    return {
-      type: isH ? 'H' : 'V',
-      color: color,
-      col: Math.floor(maxCol / 2),
-      row: 0,
-      maxCol: maxCol
-    };
+    return { type: isH ? 'H' : 'V', color: color, col: Math.floor(maxCol / 2), row: 0, maxCol: maxCol };
+  }
+
+  function getHEdge(r, c) {
+    if (r < 0 || r >= GRID_ROWS || c < -1 || c > GRID_COLS - 1) return null;
+    return hEdges[r][c] || null;
+  }
+  function getVEdge(r, c) {
+    if (r < 0 || r >= GRID_ROWS - 1 || c < -1 || c > GRID_COLS) return null;
+    return vEdges[r][c] || null;
   }
 
   function canMoveDown(piece) {
     const { type, row, col } = piece;
     if (type === 'H') {
       if (row >= GRID_ROWS - 1) return false;
-      const nextR = row + 1;
-      if (hEdges[nextR][col] !== null) return false;
-      if (vEdges[row][col] !== null || vEdges[row][col + 1] !== null) return false;
+      // Dropping H-pieces only collide with other H-pieces (slide down vertically against V-pieces)
+      if (getHEdge(row + 1, col) !== null) return false;
       return true;
     } else {
       if (row >= GRID_ROWS - 2) return false;
-      const nextR = row + 1;
-      if (vEdges[nextR][col] !== null) return false;
-      const hitLeftH = (col > 0 && hEdges[nextR][col - 1] !== null);
-      const hitRightH = (col < GRID_COLS - 1 && hEdges[nextR][col] !== null);
-      if (hitLeftH || hitRightH) return false;
+      if (getVEdge(row + 1, col) !== null) return false;
+      // V-pieces pass through dots that connect H-pieces, preventing a cross
+      if (getHEdge(row + 1, col - 1) !== null) return false;
+      if (getHEdge(row + 1, col) !== null) return false;
       return true;
     }
   }
 
-  function getProjectedRestRow(piece) {
-    let sim = { ...piece };
-    while (canMoveDown(sim)) {
-      sim.row++;
+  function canMoveLateral(piece, dir) {
+    const { type, row, col } = piece;
+    const targetCol = col + dir;
+    
+    // Bounds allowing exactly 1 col transit outside grid for routing
+    const minCol = -1;
+    const maxCol = type === 'H' ? GRID_COLS - 1 : GRID_COLS;
+    if (targetCol < minCol || targetCol > maxCol) return false;
+
+    if (type === 'H') {
+      if (getHEdge(row, targetCol) !== null) return false;
+      const wallCol = dir > 0 ? col + 1 : col;
+      if (row > 0 && getVEdge(row - 1, wallCol) !== null) return false;
+      if (row < GRID_ROWS - 1 && getVEdge(row, wallCol) !== null) return false;
+      return true;
+    } else {
+      // V-pieces sliding left/right only collide with V-pieces (slides cleanly between H-pieces)
+      if (getVEdge(row, targetCol) !== null) return false;
+      return true; 
     }
-    return sim.row;
+  }
+
+  function getRestingPositions(piece) {
+    const startCol = piece.col;
+    let queue = [{ row: 0, col: startCol, path: [{row: 0, col: startCol}] }];
+    let visited = new Set([`0_${startCol}`]);
+    let resting = [];
+
+    if (piece.type === 'H' && getHEdge(0, startCol) !== null) return [];
+    if (piece.type === 'V' && getVEdge(0, startCol) !== null) return [];
+
+    while (queue.length > 0) {
+      const cur = queue.shift();
+      const pCur = { ...piece, row: cur.row, col: cur.col };
+
+      if (!canMoveDown(pCur)) {
+        // Enforce physical resting bounds (Col -1 and Max+1 are transit ONLY)
+        if (cur.col >= 0 && cur.col <= piece.maxCol) {
+          resting.push(cur);
+        }
+      }
+
+      if (canMoveDown(pCur)) {
+        const key = `${cur.row + 1}_${cur.col}`;
+        if (!visited.has(key)) {
+          visited.add(key);
+          queue.push({ row: cur.row + 1, col: cur.col, path: [...cur.path, {row: cur.row + 1, col: cur.col}] });
+        }
+      }
+      if (canMoveLateral(pCur, -1)) {
+        const key = `${cur.row}_${cur.col - 1}`;
+        if (!visited.has(key)) {
+          visited.add(key);
+          queue.push({ row: cur.row, col: cur.col - 1, path: [...cur.path, {row: cur.row, col: cur.col - 1}] });
+        }
+      }
+      if (canMoveLateral(pCur, 1)) {
+        const key = `${cur.row}_${cur.col + 1}`;
+        if (!visited.has(key)) {
+          visited.add(key);
+          queue.push({ row: cur.row, col: cur.col + 1, path: [...cur.path, {row: cur.row, col: cur.col + 1}] });
+        }
+      }
+    }
+    return resting;
   }
 
   function pushBoardUp() {
-    for (let c = 0; c < GRID_COLS - 1; c++) {
-      if (hEdges[0][c] !== null) { gameOver(); return false; }
-    }
-    for (let c = 0; c < GRID_COLS; c++) {
-      if (vEdges[0][c] !== null) { gameOver(); return false; }
+    for (let c = -1; c <= GRID_COLS; c++) {
+      if (getHEdge(0, c) !== null) { gameOver(); return false; }
+      if (getVEdge(0, c) !== null) { gameOver(); return false; }
     }
 
     for (let r = 0; r < GRID_ROWS - 1; r++) {
-      hEdges[r] = [...hEdges[r + 1]];
+      hEdges[r] = [];
+      for (let c = -1; c <= GRID_COLS; c++) hEdges[r][c] = hEdges[r + 1][c];
     }
-    hEdges[GRID_ROWS - 1] = Array.from({ length: GRID_COLS - 1 }, () => (Math.random() < 0.45 ? 'white' : null));
+    hEdges[GRID_ROWS - 1] = [];
+    for (let c = -1; c <= GRID_COLS; c++) hEdges[GRID_ROWS - 1][c] = null;
+    for (let c = 0; c < GRID_COLS - 1; c++) {
+      if (Math.random() < 0.45) hEdges[GRID_ROWS - 1][c] = 'white';
+    }
 
     for (let r = 0; r < GRID_ROWS - 2; r++) {
-      vEdges[r] = [...vEdges[r + 1]];
+      vEdges[r] = [];
+      for (let c = -1; c <= GRID_COLS + 1; c++) vEdges[r][c] = vEdges[r + 1][c];
     }
-    vEdges[GRID_ROWS - 2] = Array.from({ length: GRID_COLS }, () => (Math.random() < 0.4 ? 'white' : null));
+    vEdges[GRID_ROWS - 2] = [];
+    for (let c = -1; c <= GRID_COLS + 1; c++) vEdges[GRID_ROWS - 2][c] = null;
+    for (let c = 0; c < GRID_COLS; c++) {
+      if (Math.random() < 0.4) vEdges[GRID_ROWS - 2][c] = 'white';
+    }
 
     sound('levelup');
     return true;
@@ -476,7 +550,7 @@
 
     for (let r = r1; r <= r2 + 1; r += (r2 - r1 + 1)) {
       for (let c = c1; c <= c2; c++) {
-        const edge = hEdges[r][c];
+        const edge = getHEdge(r, c);
         if (!edge) return null;
         if (edge !== 'white') {
           if (!targetColor) targetColor = edge;
@@ -487,7 +561,7 @@
 
     for (let r = r1; r <= r2; r++) {
       for (let c = c1; c <= c2 + 1; c += (c2 - c1 + 1)) {
-        const edge = vEdges[r][c];
+        const edge = getVEdge(r, c);
         if (!edge) return null;
         if (edge !== 'white') {
           if (!targetColor) targetColor = edge;
@@ -495,13 +569,11 @@
         }
       }
     }
-
     return targetColor || 'white';
   }
 
   function finishClearing() {
     if (!clearingAnimation) return;
-
     clearingAnimation.edges.forEach(key => {
       const [type, r, c] = key.split('_');
       if (type === 'H') hEdges[+r][+c] = null;
@@ -514,17 +586,16 @@
     if (boxesClearedInLevel === 0 && level > 1) {
       if (!pushBoardUp()) return;
     }
-
     spawnNextPiece();
   }
 
   function applyCascadeGravity() {
     for (let pass = 0; pass < GRID_ROWS; pass++) {
       for (let r = GRID_ROWS - 3; r >= 0; r--) {
-        for (let c = 0; c < GRID_COLS; c++) {
-          if (vEdges[r][c] !== null && vEdges[r + 1][c] === null) {
-            const hitLeft = (c > 0 && hEdges[r + 1][c - 1] !== null);
-            const hitRight = (c < GRID_COLS - 1 && hEdges[r + 1][c] !== null);
+        for (let c = -1; c <= GRID_COLS; c++) {
+          if (getVEdge(r, c) !== null && getVEdge(r + 1, c) === null) {
+            const hitLeft = getHEdge(r + 1, c - 1) !== null;
+            const hitRight = getHEdge(r + 1, c) !== null;
             if (!hitLeft && !hitRight) {
               vEdges[r + 1][c] = vEdges[r][c];
               vEdges[r][c] = null;
@@ -532,11 +603,10 @@
           }
         }
       }
-
       for (let r = GRID_ROWS - 2; r >= 0; r--) {
-        for (let c = 0; c < GRID_COLS - 1; c++) {
-          if (hEdges[r][c] !== null && hEdges[r + 1][c] === null) {
-            if (vEdges[r][c] === null && vEdges[r][c + 1] === null) {
+        for (let c = -1; c <= GRID_COLS; c++) {
+          if (getHEdge(r, c) !== null && getHEdge(r + 1, c) === null) {
+            if (getVEdge(r, c) === null && getVEdge(r, c + 1) === null) {
               hEdges[r + 1][c] = hEdges[r][c];
               hEdges[r][c] = null;
             }
@@ -547,21 +617,23 @@
   }
 
   function lockPiece() {
-    if (!currentPiece) return;
+    if (!currentPiece || !ghostPos) return;
 
-    const { type, color, row, col } = currentPiece;
+    const { type, color } = currentPiece;
+    const { row, col } = ghostPos;
 
     if (type === 'H') {
-      if (hEdges[row][col] !== null) { gameOver(); return; }
+      if (getHEdge(row, col) !== null) { gameOver(); return; }
       hEdges[row][col] = color;
     } else {
-      if (vEdges[row][col] !== null) { gameOver(); return; }
+      if (getVEdge(row, col) !== null) { gameOver(); return; }
       vEdges[row][col] = color;
     }
 
     sound('lock');
     currentPiece = null;
-    lastTapTarget = -1;
+    ghostPos = null;
+    lastTapKey = "";
     evaluateBoardForBoxes();
   }
 
@@ -571,13 +643,23 @@
 
     currentPiece.row = 0;
     currentPiece.col = Math.floor(currentPiece.maxCol / 2);
-    lastTapTarget = currentPiece.col;
 
-    const isBlocked = (currentPiece.type === 'H' && hEdges[0][currentPiece.col] !== null) ||
-                      (currentPiece.type === 'V' && vEdges[0][currentPiece.col] !== null);
+    const isBlocked = (currentPiece.type === 'H' && getHEdge(0, currentPiece.col) !== null) ||
+                      (currentPiece.type === 'V' && getVEdge(0, currentPiece.col) !== null);
     if (isBlocked) {
-      gameOver();
+      gameOver(); return;
     }
+
+    const resting = getRestingPositions(currentPiece);
+    const colResting = resting.filter(p => p.col === currentPiece.col);
+    if (colResting.length > 0) {
+      ghostPos = colResting.reduce((prev, curr) => curr.row > prev.row ? curr : prev);
+    } else if (resting.length > 0) {
+      ghostPos = resting[0];
+    } else {
+      ghostPos = { row: 0, col: currentPiece.col, path: [{row: 0, col: currentPiece.col}] };
+    }
+    lastTapKey = "";
   }
 
   function gameOver() {
@@ -606,7 +688,6 @@
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // 1. Recessed Tile Background Grid
     for (let r = 0; r < GRID_ROWS - 1; r++) {
       for (let c = 0; c < GRID_COLS - 1; c++) {
         const x = originX + c * cellSize;
@@ -620,7 +701,6 @@
       }
     }
 
-    // 2. Intersection Grid Dots
     for (let r = 0; r < GRID_ROWS; r++) {
       for (let c = 0; c < GRID_COLS; c++) {
         const x = originX + c * cellSize;
@@ -632,7 +712,6 @@
       }
     }
 
-    // 3. Clear Flash Animation
     if (clearingAnimation) {
       const elapsed = performance.now() - clearingAnimation.startTime;
       const progress = elapsed / clearingAnimation.duration;
@@ -652,131 +731,126 @@
         ctx.restore();
       });
 
-      if (elapsed >= clearingAnimation.duration) {
-        finishClearing();
-      }
+      if (elapsed >= clearingAnimation.duration) finishClearing();
     }
 
-    // 4. Placed Horizontal Segments
     for (let r = 0; r < GRID_ROWS; r++) {
-      for (let c = 0; c < GRID_COLS - 1; c++) {
-        const color = hEdges[r][c];
-        if (color) {
-          drawSegment(
-            originX + c * cellSize, originY + r * cellSize,
-            originX + (c + 1) * cellSize, originY + r * cellSize,
-            COLOR_PALETTE[color],
-            cellSize * 0.24
-          );
-        }
+      for (let c = -1; c <= GRID_COLS; c++) {
+        const color = getHEdge(r, c);
+        if (color) drawSegment(originX + c * cellSize, originY + r * cellSize, originX + (c + 1) * cellSize, originY + r * cellSize, COLOR_PALETTE[color], cellSize * 0.24);
       }
     }
 
-    // 5. Placed Vertical Segments
     for (let r = 0; r < GRID_ROWS - 1; r++) {
-      for (let c = 0; c < GRID_COLS; c++) {
-        const color = vEdges[r][c];
-        if (color) {
-          drawSegment(
-            originX + c * cellSize, originY + r * cellSize,
-            originX + c * cellSize, originY + (r + 1) * cellSize,
-            COLOR_PALETTE[color],
-            cellSize * 0.24
-          );
-        }
+      for (let c = -1; c <= GRID_COLS + 1; c++) {
+        const color = getVEdge(r, c);
+        if (color) drawSegment(originX + c * cellSize, originY + r * cellSize, originX + c * cellSize, originY + (r + 1) * cellSize, COLOR_PALETTE[color], cellSize * 0.24);
       }
     }
 
-    // 6. Next Piece Preview (Upper Right)
     if (nextPiece && isPlaying) {
       const pColor = COLOR_PALETTE[nextPiece.color];
       const nextX = canvas.width - originX - cellSize * 0.6;
       const nextY = originY - cellSize * 0.65;
       const prevWidth = cellSize * 0.22;
       
-      if (nextPiece.type === 'H') {
-        drawSegment(nextX - cellSize * 0.45, nextY, nextX + cellSize * 0.45, nextY, pColor, prevWidth);
-      } else {
-        drawSegment(nextX, nextY - cellSize * 0.4, nextX, nextY + cellSize * 0.4, pColor, prevWidth);
-      }
+      if (nextPiece.type === 'H') drawSegment(nextX - cellSize * 0.45, nextY, nextX + cellSize * 0.45, nextY, pColor, prevWidth);
+      else drawSegment(nextX, nextY - cellSize * 0.4, nextX, nextY + cellSize * 0.4, pColor, prevWidth);
     }
 
-    // 7. Active Piece & Drop Ghost
     if (currentPiece && isPlaying && !clearingAnimation) {
-      const { type, color, row, col } = currentPiece;
-      const pieceColor = COLOR_PALETTE[color];
-      const restRow = getProjectedRestRow(currentPiece);
+      const pieceColor = COLOR_PALETTE[currentPiece.color];
       const segWidth = cellSize * 0.24;
 
-      // Dashed Ghost Destination
-      if (restRow >= row) {
-        if (type === 'H') {
-          drawSegment(
-            originX + col * cellSize, originY + restRow * cellSize,
-            originX + (col + 1) * cellSize, originY + restRow * cellSize,
-            pieceColor,
-            segWidth,
-            [5, 4],
-            0.6
-          );
+      if (ghostPos) {
+        // Draw routing path trail to prove it's connected
+        if (ghostPos.path && ghostPos.path.length > 1) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+          ctx.lineWidth = Math.max(2, cellSize * 0.08);
+          ctx.setLineDash([cellSize * 0.15, cellSize * 0.18]);
+          ctx.lineJoin = 'round';
+          ctx.lineCap = 'round';
+
+          ghostPos.path.forEach((p, index) => {
+            let px, py;
+            if (currentPiece.type === 'H') {
+              px = originX + (p.col + 0.5) * cellSize;
+              py = originY + p.row * cellSize;
+            } else {
+              px = originX + p.col * cellSize;
+              py = originY + (p.row + 0.5) * cellSize;
+            }
+            if (index === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          });
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        if (currentPiece.type === 'H') {
+          drawSegment(originX + ghostPos.col * cellSize, originY + ghostPos.row * cellSize, originX + (ghostPos.col + 1) * cellSize, originY + ghostPos.row * cellSize, pieceColor, segWidth, [5, 4], 0.6);
         } else {
-          drawSegment(
-            originX + col * cellSize, originY + restRow * cellSize,
-            originX + col * cellSize, originY + (restRow + 1) * cellSize,
-            pieceColor,
-            segWidth,
-            [5, 4],
-            0.6
-          );
+          drawSegment(originX + ghostPos.col * cellSize, originY + ghostPos.row * cellSize, originX + ghostPos.col * cellSize, originY + (ghostPos.row + 1) * cellSize, pieceColor, segWidth, [5, 4], 0.6);
         }
       }
 
-      // Top Floating Indicator
-      if (type === 'H') {
-        drawSegment(
-          originX + col * cellSize, originY + row * cellSize,
-          originX + (col + 1) * cellSize, originY + row * cellSize,
-          pieceColor,
-          segWidth
-        );
-      } else {
-        drawSegment(
-          originX + col * cellSize, originY + row * cellSize,
-          originX + col * cellSize, originY + (row + 1) * cellSize,
-          pieceColor,
-          segWidth
-        );
+      if (!ghostPos || ghostPos.row !== 0 || ghostPos.col !== currentPiece.col) {
+        if (currentPiece.type === 'H') drawSegment(originX + currentPiece.col * cellSize, originY + 0 * cellSize, originX + (currentPiece.col + 1) * cellSize, originY + 0 * cellSize, pieceColor, segWidth);
+        else drawSegment(originX + currentPiece.col * cellSize, originY + 0 * cellSize, originX + currentPiece.col * cellSize, originY + (0 + 1) * cellSize, pieceColor, segWidth);
       }
     }
   }
 
-  // Pointer Interaction
   canvas.addEventListener('pointerdown', (e) => {
     if (!isPlaying || !currentPiece || clearingAnimation) return;
 
     const rect = canvas.getBoundingClientRect();
     const touchX = e.clientX - rect.left;
+    const touchY = e.clientY - rect.top;
     
-    let target;
+    let touchCol, touchRow;
     if (currentPiece.type === 'H') {
-      target = Math.floor((touchX - originX) / cellSize);
+      touchCol = Math.floor((touchX - originX) / cellSize);
+      touchRow = Math.round((touchY - originY) / cellSize);
     } else {
-      target = Math.round((touchX - originX) / cellSize);
+      touchCol = Math.round((touchX - originX) / cellSize);
+      touchRow = Math.floor((touchY - originY) / cellSize);
     }
-    target = Math.max(0, Math.min(currentPiece.maxCol, target));
 
+    // Lock tap inputs to viewable grid
+    touchCol = Math.max(0, Math.min(currentPiece.maxCol, touchCol));
+    const maxRow = currentPiece.type === 'H' ? GRID_ROWS - 1 : GRID_ROWS - 2;
+    touchRow = Math.max(0, Math.min(maxRow, touchRow));
+
+    const resting = getRestingPositions(currentPiece);
+    if (resting.length === 0) return;
+
+    let colResting = resting.filter(p => p.col === touchCol);
+    let bestPos = null;
+
+    if (colResting.length > 0) {
+      bestPos = colResting.reduce((prev, curr) =>
+        Math.abs(curr.row - touchRow) < Math.abs(prev.row - touchRow) ? curr : prev
+      );
+    } else {
+      bestPos = resting.reduce((prev, curr) => {
+        const distPrev = Math.abs(prev.col - touchCol) + Math.abs(prev.row - touchRow);
+        const distCurr = Math.abs(curr.col - touchCol) + Math.abs(curr.row - touchRow);
+        return distCurr < distPrev ? curr : prev;
+      });
+    }
+
+    const tapKey = `${bestPos.row}_${bestPos.col}`;
     const now = performance.now();
-    const isDoubleTap = (now - lastTapTime < 380) && (lastTapTarget === target);
-
-    if (isDoubleTap) {
-      currentPiece.col = target;
-      currentPiece.row = getProjectedRestRow(currentPiece);
+    
+    if ((now - lastTapTime < 380) && (lastTapKey === tapKey)) {
       lockPiece();
     } else {
-      currentPiece.col = target;
-      currentPiece.row = 0;
+      ghostPos = bestPos;
       sound('tick');
-      lastTapTarget = target;
+      lastTapKey = tapKey;
       lastTapTime = now;
     }
   });
@@ -814,7 +888,7 @@
     document.getElementById('menu-modal').style.display = 'flex';
   });
 
-  // Initial Load
+  initGrid();
   resizeCanvas();
   requestAnimationFrame(loop);
 </script>
