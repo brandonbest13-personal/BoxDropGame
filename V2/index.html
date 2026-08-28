@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>BoxDrop</title>
+  <title>BoxDrop v2</title>
   
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -42,15 +42,15 @@
       align-items: center;
       justify-content: space-between;
       box-sizing: border-box;
-      padding-top: max(10px, env(safe-area-inset-top));
-      padding-bottom: max(16px, env(safe-area-inset-bottom));
+      padding-top: max(8px, env(safe-area-inset-top));
+      padding-bottom: max(14px, env(safe-area-inset-bottom));
       padding-left: max(12px, env(safe-area-inset-left));
       padding-right: max(12px, env(safe-area-inset-right));
     }
 
     #header {
       width: 100%;
-      padding: 6px 12px;
+      padding: 6px 8px;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -58,13 +58,13 @@
     }
 
     .icon-btn {
-      width: 38px;
-      height: 38px;
+      width: 36px;
+      height: 36px;
       background: rgba(255, 255, 255, 0.12);
       border: 1px solid rgba(255, 255, 255, 0.18);
       border-radius: 8px;
       color: #fff;
-      font-size: 1.2rem;
+      font-size: 1.1rem;
       font-weight: bold;
       display: flex;
       align-items: center;
@@ -97,7 +97,7 @@
     }
 
     #level-progress-container {
-      width: 92%;
+      width: 96%;
       height: 4px;
       background: rgba(255, 255, 255, 0.08);
       border-radius: 2px;
@@ -135,7 +135,7 @@
       font-size: 0.8rem;
       color: #94a3b8;
       letter-spacing: 0.5px;
-      padding: 6px 0;
+      padding: 6px 0 2px 0;
       text-align: center;
     }
 
@@ -214,12 +214,12 @@
     <canvas id="gameCanvas"></canvas>
   </div>
 
-  <div id="hint-bar">Tap to preview path • Double tap to drop</div>
+  <div id="hint-bar">Tap column to preview • Double tap to drop</div>
 
   <div id="menu-modal" class="modal">
     <div class="modal-card">
       <h1>BOXDROP</h1>
-      <p class="subtitle">Single tap a slot to check if pathing is clear. Double tap to drop and lock.</p>
+      <p class="subtitle">Complete enclosed squares using Red, Blue, Green, and Wildcard White segments.<br><br>Tap to route • Double tap to drop.</p>
       <button class="start-btn" id="start-btn">PLAY</button>
     </div>
   </div>
@@ -243,7 +243,7 @@
     red: '#ff2d55',
     blue: '#2f66ff',
     green: '#10b981',
-    white: '#f8fafc'
+    white: '#fefce8'
   };
 
   const GAME_COLORS = ['red', 'blue', 'green'];
@@ -326,9 +326,10 @@
     vEdges = Array.from({ length: GRID_ROWS - 1 }, () => Array(GRID_COLS).fill(null));
     clearingAnimation = null;
 
+    // Seed bottom 4 rows with wildcard white segments
     for (let r = GRID_ROWS - 4; r < GRID_ROWS; r++) {
       for (let c = 0; c < GRID_COLS - 1; c++) {
-        if (Math.random() < 0.4) hEdges[r][c] = 'white';
+        if (Math.random() < 0.42) hEdges[r][c] = 'white';
       }
     }
     for (let r = GRID_ROWS - 4; r < GRID_ROWS - 1; r++) {
@@ -385,65 +386,12 @@
     }
   }
 
-  function canMoveLateral(piece, dir) {
-    const { type, row, col } = piece;
-    const targetCol = col + dir;
-    if (targetCol < 0 || targetCol > piece.maxCol) return false;
-
-    if (type === 'H') {
-      if (hEdges[row][targetCol] !== null) return false;
-      if (dir > 0 && vEdges[row][col + 1] !== null) return false;
-      if (dir < 0 && vEdges[row][col] !== null) return false;
-      return true;
-    } else {
-      if (vEdges[row][targetCol] !== null) return false;
-      if (dir > 0 && (hEdges[row][col] !== null || hEdges[row + 1][col] !== null)) return false;
-      if (dir < 0 && (hEdges[row][targetCol] !== null || hEdges[row + 1][targetCol] !== null)) return false;
-      return true;
-    }
-  }
-
   function getProjectedRestRow(piece) {
     let sim = { ...piece };
     while (canMoveDown(sim)) {
       sim.row++;
     }
     return sim.row;
-  }
-
-  // Breadth-first reachability search to ensure unobstructed pathing
-  function isPathReachable(piece, targetCol) {
-    const startCol = Math.floor(piece.maxCol / 2);
-    let queue = [{ row: 0, col: startCol }];
-    let visited = new Set([`0_${startCol}`]);
-
-    while (queue.length > 0) {
-      const cur = queue.shift();
-      if (cur.col === targetCol) return true;
-
-      // Downward moves
-      const pCur = { ...piece, row: cur.row, col: cur.col };
-      if (canMoveDown(pCur)) {
-        const key = `${cur.row + 1}_${cur.col}`;
-        if (!visited.has(key)) {
-          visited.add(key);
-          queue.push({ row: cur.row + 1, col: cur.col });
-        }
-      }
-
-      // Lateral moves
-      [-1, 1].forEach(dir => {
-        if (canMoveLateral(pCur, dir)) {
-          const key = `${cur.row}_${cur.col + dir}`;
-          if (!visited.has(key)) {
-            visited.add(key);
-            queue.push({ row: cur.row, col: cur.col + dir });
-          }
-        }
-      });
-    }
-
-    return false;
   }
 
   function pushBoardUp() {
@@ -639,140 +587,14 @@
     document.getElementById('gameover-modal').style.display = 'flex';
   }
 
-  function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Grid Cell Backgrounds
-    for (let r = 0; r < GRID_ROWS - 1; r++) {
-      for (let c = 0; c < GRID_COLS - 1; c++) {
-        const x = originX + c * cellSize;
-        const y = originY + r * cellSize;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
-        ctx.fillRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
-      }
-    }
-
-    // Grid Intersection Points
-    for (let r = 0; r < GRID_ROWS; r++) {
-      for (let c = 0; c < GRID_COLS; c++) {
-        const x = originX + c * cellSize;
-        const y = originY + r * cellSize;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
-        ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    // Clearing Animation
-    if (clearingAnimation) {
-      const elapsed = performance.now() - clearingAnimation.startTime;
-      const alpha = Math.max(0, 1 - elapsed / clearingAnimation.duration);
-
-      clearingAnimation.boxes.forEach(b => {
-        const bx = originX + b.c1 * cellSize;
-        const by = originY + b.r1 * cellSize;
-        const bw = (b.c2 - b.c1 + 1) * cellSize;
-        const bh = (b.r2 - b.r1 + 1) * cellSize;
-        const color = COLOR_PALETTE[b.color] || '#ffffff';
-        ctx.fillStyle = color;
-        ctx.globalAlpha = alpha * 0.4;
-        ctx.fillRect(bx, by, bw, bh);
-        ctx.globalAlpha = 1.0;
-      });
-
-      if (elapsed >= clearingAnimation.duration) {
-        finishClearing();
-      }
-    }
-
-    // Placed Horizontal Edges
-    for (let r = 0; r < GRID_ROWS; r++) {
-      for (let c = 0; c < GRID_COLS - 1; c++) {
-        const color = hEdges[r][c];
-        if (color) {
-          drawSegment(
-            originX + c * cellSize, originY + r * cellSize,
-            originX + (c + 1) * cellSize, originY + r * cellSize,
-            COLOR_PALETTE[color], 6
-          );
-        }
-      }
-    }
-
-    // Placed Vertical Edges
-    for (let r = 0; r < GRID_ROWS - 1; r++) {
-      for (let c = 0; c < GRID_COLS; c++) {
-        const color = vEdges[r][c];
-        if (color) {
-          drawSegment(
-            originX + c * cellSize, originY + r * cellSize,
-            originX + c * cellSize, originY + (r + 1) * cellSize,
-            COLOR_PALETTE[color], 6
-          );
-        }
-      }
-    }
-
-    // Upper Corner Next Piece Preview
-    if (nextPiece && isPlaying) {
-      const pColor = COLOR_PALETTE[nextPiece.color];
-      const nextX = canvas.width - originX - cellSize * 0.7;
-      const nextY = originY - cellSize * 0.65;
-      if (nextPiece.type === 'H') {
-        drawSegment(nextX - cellSize * 0.5, nextY, nextX + cellSize * 0.5, nextY, pColor, 6);
-      } else {
-        drawSegment(nextX, nextY - cellSize * 0.4, nextX, nextY + cellSize * 0.4, pColor, 6);
-      }
-    }
-
-    // Active Piece Preview & Ghost
-    if (currentPiece && isPlaying && !clearingAnimation) {
-      const { type, color, row, col } = currentPiece;
-      const pieceColor = COLOR_PALETTE[color];
-      const restRow = getProjectedRestRow(currentPiece);
-
-      // Ghost Destination Preview
-      if (restRow > row) {
-        if (type === 'H') {
-          drawSegment(
-            originX + col * cellSize, originY + restRow * cellSize,
-            originX + (col + 1) * cellSize, originY + restRow * cellSize,
-            pieceColor, 5, [5, 4]
-          );
-        } else {
-          drawSegment(
-            originX + col * cellSize, originY + restRow * cellSize,
-            originX + col * cellSize, originY + (restRow + 1) * cellSize,
-            pieceColor, 5, [5, 4]
-          );
-        }
-      }
-
-      // Active Hovering Segment
-      if (type === 'H') {
-        drawSegment(
-          originX + col * cellSize, originY + row * cellSize,
-          originX + (col + 1) * cellSize, originY + row * cellSize,
-          pieceColor, 7
-        );
-      } else {
-        drawSegment(
-          originX + col * cellSize, originY + row * cellSize,
-          originX + col * cellSize, originY + (row + 1) * cellSize,
-          pieceColor, 7
-        );
-      }
-    }
-  }
-
-  function drawSegment(x1, y1, x2, y2, color, width, dash = []) {
+  function drawSegment(x1, y1, x2, y2, color, width, dash = [], alpha = 1.0) {
     ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
     ctx.lineCap = 'round';
     ctx.shadowColor = color;
-    ctx.shadowBlur = 10;
+    ctx.shadowBlur = alpha < 1.0 ? 4 : 10;
     ctx.setLineDash(dash);
     ctx.beginPath();
     ctx.moveTo(x1, y1);
@@ -781,29 +603,181 @@
     ctx.restore();
   }
 
-  // Tap to inspect pathing, double tap to drop
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 1. Recessed Tile Background Grid
+    for (let r = 0; r < GRID_ROWS - 1; r++) {
+      for (let c = 0; c < GRID_COLS - 1; c++) {
+        const x = originX + c * cellSize;
+        const y = originY + r * cellSize;
+        const pad = 3;
+        ctx.fillStyle = '#141021';
+        ctx.fillRect(x + pad, y + pad, cellSize - pad * 2, cellSize - pad * 2);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + pad, y + pad, cellSize - pad * 2, cellSize - pad * 2);
+      }
+    }
+
+    // 2. Intersection Grid Dots
+    for (let r = 0; r < GRID_ROWS; r++) {
+      for (let c = 0; c < GRID_COLS; c++) {
+        const x = originX + c * cellSize;
+        const y = originY + r * cellSize;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(2.5, cellSize * 0.065), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 3. Clear Flash Animation
+    if (clearingAnimation) {
+      const elapsed = performance.now() - clearingAnimation.startTime;
+      const progress = elapsed / clearingAnimation.duration;
+      const alpha = Math.max(0, 1 - progress);
+
+      clearingAnimation.boxes.forEach(b => {
+        const bx = originX + b.c1 * cellSize;
+        const by = originY + b.r1 * cellSize;
+        const bw = (b.c2 - b.c1 + 1) * cellSize;
+        const bh = (b.r2 - b.r1 + 1) * cellSize;
+        const color = COLOR_PALETTE[b.color] || '#ffffff';
+        
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.globalAlpha = alpha * 0.45;
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.restore();
+      });
+
+      if (elapsed >= clearingAnimation.duration) {
+        finishClearing();
+      }
+    }
+
+    // 4. Placed Horizontal Segments
+    for (let r = 0; r < GRID_ROWS; r++) {
+      for (let c = 0; c < GRID_COLS - 1; c++) {
+        const color = hEdges[r][c];
+        if (color) {
+          drawSegment(
+            originX + c * cellSize, originY + r * cellSize,
+            originX + (c + 1) * cellSize, originY + r * cellSize,
+            COLOR_PALETTE[color],
+            cellSize * 0.24
+          );
+        }
+      }
+    }
+
+    // 5. Placed Vertical Segments
+    for (let r = 0; r < GRID_ROWS - 1; r++) {
+      for (let c = 0; c < GRID_COLS; c++) {
+        const color = vEdges[r][c];
+        if (color) {
+          drawSegment(
+            originX + c * cellSize, originY + r * cellSize,
+            originX + c * cellSize, originY + (r + 1) * cellSize,
+            COLOR_PALETTE[color],
+            cellSize * 0.24
+          );
+        }
+      }
+    }
+
+    // 6. Next Piece Preview (Upper Right)
+    if (nextPiece && isPlaying) {
+      const pColor = COLOR_PALETTE[nextPiece.color];
+      const nextX = canvas.width - originX - cellSize * 0.6;
+      const nextY = originY - cellSize * 0.65;
+      const prevWidth = cellSize * 0.22;
+      
+      if (nextPiece.type === 'H') {
+        drawSegment(nextX - cellSize * 0.45, nextY, nextX + cellSize * 0.45, nextY, pColor, prevWidth);
+      } else {
+        drawSegment(nextX, nextY - cellSize * 0.4, nextX, nextY + cellSize * 0.4, pColor, prevWidth);
+      }
+    }
+
+    // 7. Active Piece & Drop Ghost
+    if (currentPiece && isPlaying && !clearingAnimation) {
+      const { type, color, row, col } = currentPiece;
+      const pieceColor = COLOR_PALETTE[color];
+      const restRow = getProjectedRestRow(currentPiece);
+      const segWidth = cellSize * 0.24;
+
+      // Dashed Ghost Destination
+      if (restRow >= row) {
+        if (type === 'H') {
+          drawSegment(
+            originX + col * cellSize, originY + restRow * cellSize,
+            originX + (col + 1) * cellSize, originY + restRow * cellSize,
+            pieceColor,
+            segWidth,
+            [5, 4],
+            0.6
+          );
+        } else {
+          drawSegment(
+            originX + col * cellSize, originY + restRow * cellSize,
+            originX + col * cellSize, originY + (restRow + 1) * cellSize,
+            pieceColor,
+            segWidth,
+            [5, 4],
+            0.6
+          );
+        }
+      }
+
+      // Top Floating Indicator
+      if (type === 'H') {
+        drawSegment(
+          originX + col * cellSize, originY + row * cellSize,
+          originX + (col + 1) * cellSize, originY + row * cellSize,
+          pieceColor,
+          segWidth
+        );
+      } else {
+        drawSegment(
+          originX + col * cellSize, originY + row * cellSize,
+          originX + col * cellSize, originY + (row + 1) * cellSize,
+          pieceColor,
+          segWidth
+        );
+      }
+    }
+  }
+
+  // Pointer Interaction
   canvas.addEventListener('pointerdown', (e) => {
     if (!isPlaying || !currentPiece || clearingAnimation) return;
 
     const rect = canvas.getBoundingClientRect();
     const touchX = e.clientX - rect.left;
-    let target = Math.round((touchX - originX - (currentPiece.type === 'H' ? cellSize / 2 : 0)) / cellSize);
+    
+    let target;
+    if (currentPiece.type === 'H') {
+      target = Math.floor((touchX - originX) / cellSize);
+    } else {
+      target = Math.round((touchX - originX) / cellSize);
+    }
     target = Math.max(0, Math.min(currentPiece.maxCol, target));
 
     const now = performance.now();
-    const isDoubleTap = (now - lastTapTime < 320) && (lastTapTarget === target);
+    const isDoubleTap = (now - lastTapTime < 380) && (lastTapTarget === target);
 
     if (isDoubleTap) {
+      currentPiece.col = target;
       currentPiece.row = getProjectedRestRow(currentPiece);
       lockPiece();
     } else {
-      if (isPathReachable(currentPiece, target)) {
-        currentPiece.col = target;
-        currentPiece.row = 0;
-        sound('tick');
-        lastTapTarget = target;
-        lastTapTime = now;
-      }
+      currentPiece.col = target;
+      currentPiece.row = 0;
+      sound('tick');
+      lastTapTarget = target;
+      lastTapTime = now;
     }
   });
 
