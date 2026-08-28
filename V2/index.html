@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>BoxDrop v2 - Strict Physics</title>
+  <title>BoxDrop v2 - Combos & Cascades</title>
   
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -78,8 +78,16 @@
 
     .hud-meta {
       display: flex;
-      align-items: baseline;
-      gap: 12px;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .stats-col {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      justify-content: center;
+      margin-right: 6px;
     }
 
     .level-label {
@@ -87,6 +95,14 @@
       color: #a78bfa;
       font-weight: 600;
       letter-spacing: 0.5px;
+    }
+    
+    .high-score-label {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
     }
 
     .score-display {
@@ -201,7 +217,10 @@
   <div id="header">
     <button class="icon-btn" id="menu-btn">&#x276E;</button>
     <div class="hud-meta">
-      <div class="level-label">LVL <span id="level-val">1</span></div>
+      <div class="stats-col">
+        <div class="level-label">LVL <span id="level-val">1</span></div>
+        <div class="high-score-label">BEST <span id="highscore-val">0</span></div>
+      </div>
       <div class="score-display" id="score-val">0</div>
     </div>
   </div>
@@ -228,7 +247,8 @@
     <div class="modal-card">
       <h1 style="color:#ff3366;">GAME OVER</h1>
       <p class="subtitle">Pieces pushed past the top ceiling!</p>
-      <div style="font-size:2.4rem; font-weight:700; margin:16px 0; color:#fff;" id="final-score">0</div>
+      <div style="font-size:2.4rem; font-weight:700; margin:10px 0 0 0; color:#fff;" id="final-score">0</div>
+      <div id="best-score-text" style="font-size:0.9rem; font-weight:600; color:#94a3b8; margin-bottom:16px;">Best: 0</div>
       <button class="start-btn" id="restart-btn">PLAY AGAIN</button>
     </div>
   </div>
@@ -290,10 +310,13 @@
     } catch(e) {}
   }
 
+  // State Management
   let score = 0;
   let level = 1;
   let boxesClearedInLevel = 0;
   let isPlaying = false;
+  
+  let highScore = parseInt(localStorage.getItem('boxdrop_best_score')) || 0;
 
   let hEdges = [];
   let vEdges = [];
@@ -303,6 +326,11 @@
   let ghostPos = null;
   let clearingAnimation = null;
   
+  // Gravity & Chain Combo States
+  let isGravityActive = false;
+  let lastGravityTime = 0;
+  let pendingLevelUp = false;
+  
   let lastTapTime = 0;
   let lastTapKey = "";
 
@@ -310,6 +338,7 @@
   const ctx = canvas.getContext('2d');
   const scoreVal = document.getElementById('score-val');
   const levelVal = document.getElementById('level-val');
+  const highScoreVal = document.getElementById('highscore-val');
   const levelProgressBar = document.getElementById('level-progress-bar');
 
   let cellSize = 38;
@@ -330,6 +359,8 @@
     }
 
     clearingAnimation = null;
+    isGravityActive = false;
+    pendingLevelUp = false;
 
     for (let r = GRID_ROWS - 4; r < GRID_ROWS; r++) {
       for (let c = 0; c < GRID_COLS - 1; c++) {
@@ -374,46 +405,39 @@
     return vEdges[r][c] || null;
   }
 
-  // --- Strict Physics for Downward Motion ---
   function canMoveDown(piece) {
     const { type, row, col } = piece;
     if (type === 'H') {
       if (row >= GRID_ROWS - 1) return false;
       if (getHEdge(row + 1, col) !== null) return false;
-      // An H-piece dropping must have clearance on its sides
       if (getVEdge(row, col) !== null) return false;
       if (getVEdge(row, col + 1) !== null) return false;
       return true;
     } else {
       if (row >= GRID_ROWS - 2) return false;
       if (getVEdge(row + 1, col) !== null) return false;
-      // A V-piece dropping must pass cleanly through the horizontal grid line
       if (getHEdge(row + 1, col - 1) !== null) return false;
       if (getHEdge(row + 1, col) !== null) return false;
       return true;
     }
   }
 
-  // --- Strict Physics for Lateral Sliding ---
   function canMoveLateral(piece, dir) {
     const { type, row, col } = piece;
     const targetCol = col + dir;
     
-    // Bounds allowing exactly 1 col transit outside grid for routing
     const minCol = -1;
     const maxCol = type === 'H' ? GRID_COLS - 1 : GRID_COLS;
     if (targetCol < minCol || targetCol > maxCol) return false;
 
     if (type === 'H') {
       if (getHEdge(row, targetCol) !== null) return false;
-      // An H-piece sliding horizontally must pass cleanly through the vertical grid line
       const wallCol = dir > 0 ? col + 1 : col;
       if (row > 0 && getVEdge(row - 1, wallCol) !== null) return false;
       if (row < GRID_ROWS - 1 && getVEdge(row, wallCol) !== null) return false;
       return true;
     } else {
       if (getVEdge(row, targetCol) !== null) return false;
-      // A V-piece sliding horizontally must have clearance above and below it
       const crossCol = dir > 0 ? col : targetCol;
       if (getHEdge(row, crossCol) !== null) return false;
       if (getHEdge(row + 1, crossCol) !== null) return false;
@@ -434,15 +458,12 @@
       const cur = queue.shift();
       const pCur = { ...piece, row: cur.row, col: cur.col };
 
-      // Valid target only if it's supported by floor/walls AND inside viewable grid bounds
       if (!canMoveDown(pCur)) {
         if (cur.col >= 0 && cur.col <= piece.maxCol) {
           resting.push(cur);
         }
       }
 
-      // Priority Fix: Explore lateral options BEFORE vertical drops
-      // This forces the BFS to prioritize high lateral slides and straight vertical drops
       if (canMoveLateral(pCur, -1)) {
         const key = `${cur.row}_${cur.col - 1}`;
         if (!visited.has(key)) {
@@ -498,6 +519,7 @@
     return true;
   }
 
+  // --- RECURSIVE CHAIN EVALUATION ---
   function evaluateBoardForBoxes() {
     let completedBoxes = [];
     let edgesToClear = new Set();
@@ -537,8 +559,9 @@
       boxesClearedInLevel += completedBoxes.length;
       if (boxesClearedInLevel >= BOXES_PER_LEVEL) {
         level++;
-        boxesClearedInLevel = 0;
+        boxesClearedInLevel -= BOXES_PER_LEVEL;
         levelVal.textContent = level;
+        pendingLevelUp = true;
       }
       levelProgressBar.style.width = `${(boxesClearedInLevel / BOXES_PER_LEVEL) * 100}%`;
 
@@ -549,6 +572,15 @@
         duration: 320
       };
     } else {
+      // If we finished clearing combos, process level up push if pending
+      if (pendingLevelUp) {
+        if (!pushBoardUp()) return;
+        pendingLevelUp = false;
+        
+        // Pushing the board up generates new pieces, which might form a new box
+        evaluateBoardForBoxes();
+        return;
+      }
       spawnNextPiece();
     }
   }
@@ -589,39 +621,44 @@
     });
 
     clearingAnimation = null;
-    applyCascadeGravity();
-
-    if (boxesClearedInLevel === 0 && level > 1) {
-      if (!pushBoardUp()) return;
-    }
-    spawnNextPiece();
+    
+    // Start Gravity Cascade Animation loop
+    isGravityActive = true;
+    lastGravityTime = performance.now();
   }
 
-  function applyCascadeGravity() {
-    for (let pass = 0; pass < GRID_ROWS; pass++) {
-      for (let r = GRID_ROWS - 3; r >= 0; r--) {
-        for (let c = -1; c <= GRID_COLS; c++) {
-          if (getVEdge(r, c) !== null && getVEdge(r + 1, c) === null) {
-            const hitLeft = getHEdge(r + 1, c - 1) !== null;
-            const hitRight = getHEdge(r + 1, c) !== null;
-            if (!hitLeft && !hitRight) {
-              vEdges[r + 1][c] = vEdges[r][c];
-              vEdges[r][c] = null;
-            }
-          }
-        }
-      }
-      for (let r = GRID_ROWS - 2; r >= 0; r--) {
-        for (let c = -1; c <= GRID_COLS; c++) {
-          if (getHEdge(r, c) !== null && getHEdge(r + 1, c) === null) {
-            if (getVEdge(r, c) === null && getVEdge(r, c + 1) === null) {
-              hEdges[r + 1][c] = hEdges[r][c];
-              hEdges[r][c] = null;
-            }
+  // --- ANIMATED GRAVITY SYSTEM ---
+  function stepGravity() {
+    let moved = false;
+    
+    // Drop V-Edges by exactly 1 grid slot
+    for (let r = GRID_ROWS - 3; r >= 0; r--) {
+      for (let c = -1; c <= GRID_COLS; c++) {
+        if (getVEdge(r, c) !== null && getVEdge(r + 1, c) === null) {
+          const hitLeft = getHEdge(r + 1, c - 1) !== null;
+          const hitRight = getHEdge(r + 1, c) !== null;
+          if (!hitLeft && !hitRight) {
+            vEdges[r + 1][c] = vEdges[r][c];
+            vEdges[r][c] = null;
+            moved = true;
           }
         }
       }
     }
+    
+    // Drop H-Edges by exactly 1 grid slot
+    for (let r = GRID_ROWS - 2; r >= 0; r--) {
+      for (let c = -1; c <= GRID_COLS; c++) {
+        if (getHEdge(r, c) !== null && getHEdge(r + 1, c) === null) {
+          if (getVEdge(r, c) === null && getVEdge(r, c + 1) === null) {
+            hEdges[r + 1][c] = hEdges[r][c];
+            hEdges[r][c] = null;
+            moved = true;
+          }
+        }
+      }
+    }
+    return moved;
   }
 
   function lockPiece() {
@@ -673,7 +710,26 @@
   function gameOver() {
     isPlaying = false;
     sound('gameover');
+    
+    let isNewBest = false;
+    if (score > highScore && score > 0) {
+      highScore = score;
+      localStorage.setItem('boxdrop_best_score', highScore);
+      highScoreVal.textContent = highScore;
+      isNewBest = true;
+    }
+
     document.getElementById('final-score').textContent = score;
+    
+    const bestText = document.getElementById('best-score-text');
+    if (isNewBest) {
+      bestText.textContent = "NEW HIGH SCORE!";
+      bestText.style.color = "#10b981"; 
+    } else {
+      bestText.textContent = `Best: ${highScore}`;
+      bestText.style.color = "#94a3b8"; 
+    }
+
     document.getElementById('gameover-modal').style.display = 'flex';
   }
 
@@ -766,7 +822,8 @@
       else drawSegment(nextX, nextY - cellSize * 0.4, nextX, nextY + cellSize * 0.4, pColor, prevWidth);
     }
 
-    if (currentPiece && isPlaying && !clearingAnimation) {
+    // Hide active piece interaction rendering if combos or gravity are actively happening
+    if (currentPiece && isPlaying && !clearingAnimation && !isGravityActive) {
       const pieceColor = COLOR_PALETTE[currentPiece.color];
       const segWidth = cellSize * 0.24;
 
@@ -811,7 +868,8 @@
   }
 
   canvas.addEventListener('pointerdown', (e) => {
-    if (!isPlaying || !currentPiece || clearingAnimation) return;
+    // Block interaction during combos and falling animations
+    if (!isPlaying || !currentPiece || clearingAnimation || isGravityActive) return;
 
     const rect = canvas.getBoundingClientRect();
     const touchX = e.clientX - rect.left;
@@ -862,6 +920,20 @@
   });
 
   function loop() {
+    const now = performance.now();
+    
+    // Execute gravity step-by-step
+    if (isGravityActive && (now - lastGravityTime > 90)) {
+      const moved = stepGravity();
+      if (moved) {
+        lastGravityTime = now;
+      } else {
+        // When gravity finishes settling, evaluate again to catch chain-reaction combos
+        isGravityActive = false;
+        evaluateBoardForBoxes();
+      }
+    }
+    
     draw();
     requestAnimationFrame(loop);
   }
@@ -875,6 +947,7 @@
     scoreVal.textContent = '0';
     levelVal.textContent = '1';
     levelProgressBar.style.width = '0%';
+    highScoreVal.textContent = highScore;
     
     initGrid();
     resizeCanvas();
@@ -896,6 +969,7 @@
 
   initGrid();
   resizeCanvas();
+  highScoreVal.textContent = highScore;
   requestAnimationFrame(loop);
 </script>
 </body>
