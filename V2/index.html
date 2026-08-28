@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>BoxDrop v2 - Final Pathing Physics</title>
+  <title>BoxDrop v2 - Strict Physics</title>
   
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -219,7 +219,7 @@
   <div id="menu-modal" class="modal">
     <div class="modal-card">
       <h1>BOXDROP</h1>
-      <p class="subtitle">Complete enclosed squares. Pieces can be routed under overhangs via legal paths.<br><br>Tap pocket to route • Double tap to lock.</p>
+      <p class="subtitle">Complete enclosed squares. Pieces are solid and must physically fit through gaps.<br><br>Tap pocket to route • Double tap to lock.</p>
       <button class="start-btn" id="start-btn">PLAY</button>
     </div>
   </div>
@@ -320,7 +320,6 @@
     hEdges = [];
     vEdges = [];
     
-    // Arrays sized to support -1 and GRID_COLS for boundary checking and drawing
     for (let r = 0; r < GRID_ROWS; r++) {
       hEdges[r] = [];
       for (let c = -1; c <= GRID_COLS; c++) hEdges[r][c] = null;
@@ -332,7 +331,6 @@
 
     clearingAnimation = null;
 
-    // Seed bottom rows with wildcard white segments
     for (let r = GRID_ROWS - 4; r < GRID_ROWS; r++) {
       for (let c = 0; c < GRID_COLS - 1; c++) {
         if (Math.random() < 0.42) hEdges[r][c] = 'white';
@@ -376,23 +374,27 @@
     return vEdges[r][c] || null;
   }
 
+  // --- Strict Physics for Downward Motion ---
   function canMoveDown(piece) {
     const { type, row, col } = piece;
     if (type === 'H') {
       if (row >= GRID_ROWS - 1) return false;
-      // Dropping H-pieces only collide with other H-pieces (slide down vertically against V-pieces)
       if (getHEdge(row + 1, col) !== null) return false;
+      // An H-piece dropping must have clearance on its sides
+      if (getVEdge(row, col) !== null) return false;
+      if (getVEdge(row, col + 1) !== null) return false;
       return true;
     } else {
       if (row >= GRID_ROWS - 2) return false;
       if (getVEdge(row + 1, col) !== null) return false;
-      // V-pieces pass through dots that connect H-pieces, preventing a cross
+      // A V-piece dropping must pass cleanly through the horizontal grid line
       if (getHEdge(row + 1, col - 1) !== null) return false;
       if (getHEdge(row + 1, col) !== null) return false;
       return true;
     }
   }
 
+  // --- Strict Physics for Lateral Sliding ---
   function canMoveLateral(piece, dir) {
     const { type, row, col } = piece;
     const targetCol = col + dir;
@@ -404,13 +406,17 @@
 
     if (type === 'H') {
       if (getHEdge(row, targetCol) !== null) return false;
+      // An H-piece sliding horizontally must pass cleanly through the vertical grid line
       const wallCol = dir > 0 ? col + 1 : col;
       if (row > 0 && getVEdge(row - 1, wallCol) !== null) return false;
       if (row < GRID_ROWS - 1 && getVEdge(row, wallCol) !== null) return false;
       return true;
     } else {
-      // V-pieces sliding left/right only collide with V-pieces (slides cleanly between H-pieces)
       if (getVEdge(row, targetCol) !== null) return false;
+      // A V-piece sliding horizontally must have clearance above and below it
+      const crossCol = dir > 0 ? col : targetCol;
+      if (getHEdge(row, crossCol) !== null) return false;
+      if (getHEdge(row + 1, crossCol) !== null) return false;
       return true; 
     }
   }
@@ -428,20 +434,15 @@
       const cur = queue.shift();
       const pCur = { ...piece, row: cur.row, col: cur.col };
 
+      // Valid target only if it's supported by floor/walls AND inside viewable grid bounds
       if (!canMoveDown(pCur)) {
-        // Enforce physical resting bounds (Col -1 and Max+1 are transit ONLY)
         if (cur.col >= 0 && cur.col <= piece.maxCol) {
           resting.push(cur);
         }
       }
 
-      if (canMoveDown(pCur)) {
-        const key = `${cur.row + 1}_${cur.col}`;
-        if (!visited.has(key)) {
-          visited.add(key);
-          queue.push({ row: cur.row + 1, col: cur.col, path: [...cur.path, {row: cur.row + 1, col: cur.col}] });
-        }
-      }
+      // Priority Fix: Explore lateral options BEFORE vertical drops
+      // This forces the BFS to prioritize high lateral slides and straight vertical drops
       if (canMoveLateral(pCur, -1)) {
         const key = `${cur.row}_${cur.col - 1}`;
         if (!visited.has(key)) {
@@ -454,6 +455,13 @@
         if (!visited.has(key)) {
           visited.add(key);
           queue.push({ row: cur.row, col: cur.col + 1, path: [...cur.path, {row: cur.row, col: cur.col + 1}] });
+        }
+      }
+      if (canMoveDown(pCur)) {
+        const key = `${cur.row + 1}_${cur.col}`;
+        if (!visited.has(key)) {
+          visited.add(key);
+          queue.push({ row: cur.row + 1, col: cur.col, path: [...cur.path, {row: cur.row + 1, col: cur.col}] });
         }
       }
     }
@@ -763,7 +771,6 @@
       const segWidth = cellSize * 0.24;
 
       if (ghostPos) {
-        // Draw routing path trail to prove it's connected
         if (ghostPos.path && ghostPos.path.length > 1) {
           ctx.save();
           ctx.beginPath();
@@ -819,7 +826,6 @@
       touchRow = Math.floor((touchY - originY) / cellSize);
     }
 
-    // Lock tap inputs to viewable grid
     touchCol = Math.max(0, Math.min(currentPiece.maxCol, touchCol));
     const maxRow = currentPiece.type === 'H' ? GRID_ROWS - 1 : GRID_ROWS - 2;
     touchRow = Math.max(0, Math.min(maxRow, touchRow));
