@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>BoxDrop v2 - Combos & Cascades</title>
+  <title>BoxDrop v2 - Strict Physics + Combos</title>
   
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -255,8 +255,8 @@
 </div>
 
 <script>
-  const GRID_ROWS = 10;
-  const GRID_COLS = 8;
+  const GRID_ROWS = 12;
+  const GRID_COLS = 10;
   const BOXES_PER_LEVEL = 4;
 
   const COLOR_PALETTE = {
@@ -310,7 +310,6 @@
     } catch(e) {}
   }
 
-  // State Management
   let score = 0;
   let level = 1;
   let boxesClearedInLevel = 0;
@@ -326,7 +325,7 @@
   let ghostPos = null;
   let clearingAnimation = null;
   
-  // Gravity & Chain Combo States
+  // States for chain reaction combos
   let isGravityActive = false;
   let lastGravityTime = 0;
   let pendingLevelUp = false;
@@ -405,20 +404,36 @@
     return vEdges[r][c] || null;
   }
 
+  // --- BASELINE PHYSICS (UNCHANGED) ---
   function canMoveDown(piece) {
     const { type, row, col } = piece;
+    
     if (type === 'H') {
       if (row >= GRID_ROWS - 1) return false;
-      if (getHEdge(row + 1, col) !== null) return false;
-      if (getVEdge(row, col) !== null) return false;
-      if (getVEdge(row, col + 1) !== null) return false;
+      if (getHEdge(row + 1, col) !== null) return false; // Floor
+      
+      // Sweep Track Blocks
+      if (getVEdge(row, col) !== null) return false;     // Left vertical wall
+      if (getVEdge(row, col + 1) !== null) return false; // Right vertical wall
+      
+      // Pinch Points (Vertex scraping as it leaves 'row')
+      if (getHEdge(row, col - 1) !== null) return false; 
+      if (getHEdge(row, col + 1) !== null) return false; 
+      if (row > 0) {
+        if (getVEdge(row - 1, col) !== null) return false;
+        if (getVEdge(row - 1, col + 1) !== null) return false;
+      }
       return true;
+      
     } else {
       if (row >= GRID_ROWS - 2) return false;
-      if (getVEdge(row + 1, col) !== null) return false;
-      if (getHEdge(row + 1, col - 1) !== null) return false;
-      if (getHEdge(row + 1, col) !== null) return false;
-      return true;
+      if (getVEdge(row + 1, col) !== null) return false; // Floor
+      
+      // Sweep Track Blocks
+      if (getHEdge(row + 1, col - 1) !== null) return false; // Crossing horizontal wall
+      if (getHEdge(row + 1, col) !== null) return false;     // Crossing horizontal wall
+      
+      return true; // V-pieces sliding along axis do not pinch
     }
   }
 
@@ -431,16 +446,31 @@
     if (targetCol < minCol || targetCol > maxCol) return false;
 
     if (type === 'H') {
-      if (getHEdge(row, targetCol) !== null) return false;
+      if (getHEdge(row, targetCol) !== null) return false; // Destination
+      
+      // Sweep Track Blocks
       const wallCol = dir > 0 ? col + 1 : col;
-      if (row > 0 && getVEdge(row - 1, wallCol) !== null) return false;
-      if (row < GRID_ROWS - 1 && getVEdge(row, wallCol) !== null) return false;
-      return true;
+      if (row > 0 && getVEdge(row - 1, wallCol) !== null) return false; 
+      if (row < GRID_ROWS - 1 && getVEdge(row, wallCol) !== null) return false; 
+      
+      return true; // H-pieces sliding along axis do not pinch
+      
     } else {
-      if (getVEdge(row, targetCol) !== null) return false;
+      if (getVEdge(row, targetCol) !== null) return false; // Destination
+      
+      // Sweep Track Blocks
       const crossCol = dir > 0 ? col : targetCol;
-      if (getHEdge(row, crossCol) !== null) return false;
-      if (getHEdge(row + 1, crossCol) !== null) return false;
+      if (getHEdge(row, crossCol) !== null) return false;     // Top horizontal wall
+      if (getHEdge(row + 1, crossCol) !== null) return false; // Bottom horizontal wall
+      
+      // Pinch Points (Vertex scraping as it leaves 'col')
+      const awayColH = dir > 0 ? col - 1 : col; 
+      if (getHEdge(row, awayColH) !== null) return false;     
+      if (getHEdge(row + 1, awayColH) !== null) return false; 
+      
+      if (row > 0 && getVEdge(row - 1, col) !== null) return false; 
+      if (row < GRID_ROWS - 2 && getVEdge(row + 1, col) !== null) return false; 
+      
       return true; 
     }
   }
@@ -464,6 +494,7 @@
         }
       }
 
+      // Priority: Lateral moves first yields straight down paths
       if (canMoveLateral(pCur, -1)) {
         const key = `${cur.row}_${cur.col - 1}`;
         if (!visited.has(key)) {
@@ -519,32 +550,85 @@
     return true;
   }
 
-  // --- RECURSIVE CHAIN EVALUATION ---
-  function evaluateBoardForBoxes() {
+  // --- FLOOD FILL EVALUATION & Y^2 SCORING ---
+  function evaluateBoardForBoxes(isCascade = false) {
     let completedBoxes = [];
     let edgesToClear = new Set();
-    let totalCells = 0;
+    let earnedPoints = 0;
+    let visitedCells = new Set();
 
-    for (let r1 = 0; r1 < GRID_ROWS - 1; r1++) {
-      for (let c1 = 0; c1 < GRID_COLS - 1; c1++) {
-        for (let r2 = r1; r2 < GRID_ROWS - 1; r2++) {
-          for (let c2 = c1; c2 < GRID_COLS - 1; c2++) {
-            const color = getBoxMatchColor(r1, c1, r2, c2);
-            if (color) {
-              const count = (r2 - r1 + 1) * (c2 - c1 + 1);
-              totalCells += count;
-              completedBoxes.push({ r1, c1, r2, c2, color });
+    for (let r = 0; r < GRID_ROWS - 1; r++) {
+      for (let c = 0; c < GRID_COLS - 1; c++) {
+        const cellKey = `${r}_${c}`;
+        if (visitedCells.has(cellKey)) continue;
 
-              for (let r = r1; r <= r2 + 1; r++) {
-                for (let c = c1; c <= c2; c++) {
-                  if (r === r1 || r === r2 + 1) edgesToClear.add(`H_${r}_${c}`);
-                }
+        let queue = [{r, c}];
+        let regionCells = [];
+        let regionEdges = new Map(); 
+        let isEnclosed = true;
+        let regionVisited = new Set([cellKey]);
+
+        while (queue.length > 0) {
+          let curr = queue.shift();
+          regionCells.push(curr);
+          visitedCells.add(`${curr.r}_${curr.c}`);
+
+          let topEdge = getHEdge(curr.r, curr.c);
+          if (topEdge) regionEdges.set(`H_${curr.r}_${curr.c}`, topEdge);
+          else if (curr.r === 0) isEnclosed = false; 
+          else if (!regionVisited.has(`${curr.r - 1}_${curr.c}`)) {
+            regionVisited.add(`${curr.r - 1}_${curr.c}`);
+            queue.push({r: curr.r - 1, c: curr.c});
+          }
+
+          let bottomEdge = getHEdge(curr.r + 1, curr.c);
+          if (bottomEdge) regionEdges.set(`H_${curr.r + 1}_${curr.c}`, bottomEdge);
+          else if (curr.r === GRID_ROWS - 2) isEnclosed = false; 
+          else if (!regionVisited.has(`${curr.r + 1}_${curr.c}`)) {
+            regionVisited.add(`${curr.r + 1}_${curr.c}`);
+            queue.push({r: curr.r + 1, c: curr.c});
+          }
+
+          let leftEdge = getVEdge(curr.r, curr.c);
+          if (leftEdge) regionEdges.set(`V_${curr.r}_${curr.c}`, leftEdge);
+          else if (curr.c === 0) isEnclosed = false; 
+          else if (!regionVisited.has(`${curr.r}_${curr.c - 1}`)) {
+            regionVisited.add(`${curr.r}_${curr.c - 1}`);
+            queue.push({r: curr.r, c: curr.c - 1});
+          }
+
+          let rightEdge = getVEdge(curr.r, curr.c + 1);
+          if (rightEdge) regionEdges.set(`V_${curr.r}_${curr.c + 1}`, rightEdge);
+          else if (curr.c === GRID_COLS - 2) isEnclosed = false; 
+          else if (!regionVisited.has(`${curr.r}_${curr.c + 1}`)) {
+            regionVisited.add(`${curr.r}_${curr.c + 1}`);
+            queue.push({r: curr.r, c: curr.c + 1});
+          }
+        }
+
+        if (isEnclosed) {
+          let targetColor = null;
+          let isValid = true;
+          for (let color of regionEdges.values()) {
+            if (color !== 'white') {
+              if (!targetColor) targetColor = color;
+              else if (targetColor !== color) {
+                isValid = false; 
+                break;
               }
-              for (let r = r1; r <= r2; r++) {
-                for (let c = c1; c <= c2 + 1; c++) {
-                  if (c === c1 || c === c2 + 1) edgesToClear.add(`V_${r}_${c}`);
-                }
-              }
+            }
+          }
+
+          if (isValid) {
+            let multiplier = isCascade ? 2 : 1;
+            let y = regionCells.length;
+            earnedPoints += (y * y) * multiplier;
+            completedBoxes.push({
+              cells: regionCells, 
+              color: targetColor || 'white'
+            });
+            for (let key of regionEdges.keys()) {
+              edgesToClear.add(key);
             }
           }
         }
@@ -553,7 +637,7 @@
 
     if (completedBoxes.length > 0) {
       sound('clear');
-      score += Math.pow(3, totalCells) * 10;
+      score += earnedPoints;
       scoreVal.textContent = score;
 
       boxesClearedInLevel += completedBoxes.length;
@@ -572,44 +656,14 @@
         duration: 320
       };
     } else {
-      // If we finished clearing combos, process level up push if pending
       if (pendingLevelUp) {
         if (!pushBoardUp()) return;
         pendingLevelUp = false;
-        
-        // Pushing the board up generates new pieces, which might form a new box
-        evaluateBoardForBoxes();
+        evaluateBoardForBoxes(isCascade);
         return;
       }
       spawnNextPiece();
     }
-  }
-
-  function getBoxMatchColor(r1, c1, r2, c2) {
-    let targetColor = null;
-
-    for (let r = r1; r <= r2 + 1; r += (r2 - r1 + 1)) {
-      for (let c = c1; c <= c2; c++) {
-        const edge = getHEdge(r, c);
-        if (!edge) return null;
-        if (edge !== 'white') {
-          if (!targetColor) targetColor = edge;
-          else if (targetColor !== edge) return null;
-        }
-      }
-    }
-
-    for (let r = r1; r <= r2; r++) {
-      for (let c = c1; c <= c2 + 1; c += (c2 - c1 + 1)) {
-        const edge = getVEdge(r, c);
-        if (!edge) return null;
-        if (edge !== 'white') {
-          if (!targetColor) targetColor = edge;
-          else if (targetColor !== edge) return null;
-        }
-      }
-    }
-    return targetColor || 'white';
   }
 
   function finishClearing() {
@@ -621,17 +675,15 @@
     });
 
     clearingAnimation = null;
-    
-    // Start Gravity Cascade Animation loop
     isGravityActive = true;
     lastGravityTime = performance.now();
   }
 
-  // --- ANIMATED GRAVITY SYSTEM ---
+  // --- ANIMATED GRAVITY CASCADE ---
   function stepGravity() {
     let moved = false;
     
-    // Drop V-Edges by exactly 1 grid slot
+    // Evaluate Vertical pieces
     for (let r = GRID_ROWS - 3; r >= 0; r--) {
       for (let c = -1; c <= GRID_COLS; c++) {
         if (getVEdge(r, c) !== null && getVEdge(r + 1, c) === null) {
@@ -646,7 +698,7 @@
       }
     }
     
-    // Drop H-Edges by exactly 1 grid slot
+    // Evaluate Horizontal pieces
     for (let r = GRID_ROWS - 2; r >= 0; r--) {
       for (let c = -1; c <= GRID_COLS; c++) {
         if (getHEdge(r, c) !== null && getHEdge(r + 1, c) === null) {
@@ -782,16 +834,17 @@
       const alpha = Math.max(0, 1 - progress);
 
       clearingAnimation.boxes.forEach(b => {
-        const bx = originX + b.c1 * cellSize;
-        const by = originY + b.r1 * cellSize;
-        const bw = (b.c2 - b.c1 + 1) * cellSize;
-        const bh = (b.r2 - b.r1 + 1) * cellSize;
         const color = COLOR_PALETTE[b.color] || '#ffffff';
-        
         ctx.save();
         ctx.fillStyle = color;
         ctx.globalAlpha = alpha * 0.45;
-        ctx.fillRect(bx, by, bw, bh);
+        
+        b.cells.forEach(cell => {
+          const bx = originX + cell.c * cellSize;
+          const by = originY + cell.r * cellSize;
+          ctx.fillRect(bx, by, cellSize, cellSize);
+        });
+        
         ctx.restore();
       });
 
@@ -822,7 +875,6 @@
       else drawSegment(nextX, nextY - cellSize * 0.4, nextX, nextY + cellSize * 0.4, pColor, prevWidth);
     }
 
-    // Hide active piece interaction rendering if combos or gravity are actively happening
     if (currentPiece && isPlaying && !clearingAnimation && !isGravityActive) {
       const pieceColor = COLOR_PALETTE[currentPiece.color];
       const segWidth = cellSize * 0.24;
@@ -868,7 +920,6 @@
   }
 
   canvas.addEventListener('pointerdown', (e) => {
-    // Block interaction during combos and falling animations
     if (!isPlaying || !currentPiece || clearingAnimation || isGravityActive) return;
 
     const rect = canvas.getBoundingClientRect();
@@ -922,15 +973,13 @@
   function loop() {
     const now = performance.now();
     
-    // Execute gravity step-by-step
     if (isGravityActive && (now - lastGravityTime > 90)) {
       const moved = stepGravity();
       if (moved) {
         lastGravityTime = now;
       } else {
-        // When gravity finishes settling, evaluate again to catch chain-reaction combos
         isGravityActive = false;
-        evaluateBoardForBoxes();
+        evaluateBoardForBoxes(true);
       }
     }
     
