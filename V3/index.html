@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Grid Crawler: Pixel Art Edition</title>
+  <title>Grid Crawler: Class Update</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; font-family: monospace; }
     
@@ -40,7 +40,7 @@
       background: #1a1a1a;
     }
 
-    .weapon-card {
+    .class-card {
       background: #333;
       border: 2px solid #555;
       padding: 15px;
@@ -49,9 +49,9 @@
       cursor: pointer;
       border-radius: 6px;
     }
-    .weapon-card:hover { border-color: #3b82f6; background: #2a3b4c; }
+    .class-card:hover { border-color: #3b82f6; background: #2a3b4c; }
     .w-title { font-size: 18px; font-weight: bold; color: #3b82f6; margin-bottom: 5px; }
-    .w-desc { font-size: 12px; color: #aaa; }
+    .w-desc { font-size: 12px; color: #aaa; line-height: 1.4; }
 
     /* Game UI */
     #game-screen {
@@ -134,19 +134,19 @@
 <div id="app">
   <div id="start-screen">
     <h1 style="color:#eab308; margin-bottom: 20px;">GRID CRAWLER</h1>
-    <p style="font-size:12px; color:#aaa; margin-bottom: 20px;">Choose your loadout. Tap adjacent tiles to move/attack.</p>
+    <p style="font-size:12px; color:#aaa; margin-bottom: 20px;">Choose your class. Tap adjacent tiles to move/attack.</p>
     
-    <div class="weapon-card" data-w="dagger">
-      <div class="w-title">Rogue's Dagger</div>
-      <div class="w-desc">1 AP to Attack | 1 DMG<br>Fast, allows hit-and-run tactics.</div>
+    <div class="class-card" data-c="rogue">
+      <div class="w-title">The Rogue</div>
+      <div class="w-desc"><strong>4 AP Max</strong> | Dagger (1 AP = 1 DMG)<br>High mobility. Master of hit-and-run tactics.</div>
     </div>
-    <div class="weapon-card" data-w="sword">
-      <div class="w-title">Knight's Sword</div>
-      <div class="w-desc">2 AP to Attack | 3 DMG<br>Balanced damage and mobility.</div>
+    <div class="class-card" data-c="knight">
+      <div class="w-title">The Knight</div>
+      <div class="w-desc"><strong>3 AP Max</strong> | Sword (2 AP = 3 DMG)<br>Balanced movement and heavy strikes.</div>
     </div>
-    <div class="weapon-card" data-w="axe">
-      <div class="w-title">Berserker's Axe</div>
-      <div class="w-desc">3 AP to Attack | 4 DMG (Cleave)<br>Hits ALL adjacent enemies. No AP left to move.</div>
+    <div class="class-card" data-c="berserker">
+      <div class="w-title">The Berserker</div>
+      <div class="w-desc"><strong>3 AP Max</strong> | Axe (3 AP = 4 DMG Cleave)<br>Slow. Hits ALL adjacent enemies in one massive swing.</div>
     </div>
   </div>
 
@@ -186,7 +186,7 @@
   };
 
   // --- GAME STATE ---
-  let player = { x: 0, y: 0, hp: 20, maxHp: 20, ap: 3, maxAp: 3, weapon: null };
+  let player = { x: 0, y: 0, hp: 20, maxHp: 20, ap: 3, maxAp: 3, classDef: null, classId: null };
   let depth = 1;
   let entities = [];
   let walls = [];
@@ -194,16 +194,21 @@
   let stairs = null;
   let isPlayerTurn = true;
 
-  const WEAPONS = {
-    dagger: { cost: 1, dmg: 1, name: "Dagger", cleave: false },
-    sword:  { cost: 2, dmg: 3, name: "Sword", cleave: false },
-    axe:    { cost: 3, dmg: 4, name: "Axe", cleave: true }
+  const CLASSES = {
+    rogue:     { cost: 1, dmg: 1, maxAp: 4, name: "Rogue", cleave: false },
+    knight:    { cost: 2, dmg: 3, maxAp: 3, name: "Knight", cleave: false },
+    berserker: { cost: 3, dmg: 4, maxAp: 3, name: "Berserker", cleave: true }
   };
 
   // --- INITIALIZATION ---
-  document.querySelectorAll('.weapon-card').forEach(card => {
+  document.querySelectorAll('.class-card').forEach(card => {
     card.addEventListener('click', (e) => {
-      player.weapon = WEAPONS[e.currentTarget.dataset.w];
+      const cId = e.currentTarget.dataset.c;
+      player.classId = cId;
+      player.classDef = CLASSES[cId];
+      player.maxAp = player.classDef.maxAp;
+      player.ap = player.maxAp; // Set dynamic AP
+
       els.start.style.display = 'none';
       els.game.style.display = 'flex';
       generateRoom(true); 
@@ -233,7 +238,7 @@
         player.hp = Math.min(player.maxHp, player.hp + heal);
         dmLog(`You descend the stairs. Restored ${heal} HP.`, 'log-sys');
       } else {
-        dmLog(`You enter the dungeon with your ${player.weapon.name}.`, 'log-sys');
+        dmLog(`You enter the dungeon as the ${player.classDef.name}.`, 'log-sys');
       }
     } else {
       dmLog(`You push through the heavy door into a new room.`, 'log-sys');
@@ -248,7 +253,6 @@
 
     player.x = 4; player.y = 4;
 
-    // 1. Generate Walls
     for (let i = 0; i < 15; i++) {
       let wx, wy;
       do {
@@ -258,7 +262,6 @@
       walls.push({x: wx, y: wy});
     }
 
-    // 2. Generate Exits (Stairs or Doors)
     if (Math.random() < 0.3) {
       let sx, sy;
       do {
@@ -283,7 +286,6 @@
       }
     }
 
-    // 3. Generate Enemies (Avoid walls AND exits)
     const numEnemies = Math.min(6, 1 + Math.floor(depth / 2) + Math.floor(Math.random() * 2));
     for (let i = 0; i < numEnemies; i++) {
       let ex, ey;
@@ -320,14 +322,14 @@
 
   // --- COMBAT & MOVEMENT ---
   function executePlayerAttack(targetX, targetY) {
-    if (player.ap < player.weapon.cost) {
-      dmLog(`Not enough AP to swing ${player.weapon.name}. (Needs ${player.weapon.cost})`, 'log-warn');
+    if (player.ap < player.classDef.cost) {
+      dmLog(`Not enough AP to swing. (Needs ${player.classDef.cost})`, 'log-warn');
       return;
     }
-    player.ap -= player.weapon.cost;
+    player.ap -= player.classDef.cost;
     
     let targets = [];
-    if (player.weapon.cleave) {
+    if (player.classDef.cleave) {
       const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
       dirs.forEach(d => {
         const t = getEnemyAt(player.x + d[0], player.y + d[1]);
@@ -340,8 +342,8 @@
 
     targets.forEach(enemy => {
       if (rollHit(70)) {
-        enemy.hp -= player.weapon.dmg;
-        dmLog(`Rolled hit! You strike ${enemy.name} for ${player.weapon.dmg} DMG.`, 'log-p-hit');
+        enemy.hp -= player.classDef.dmg;
+        dmLog(`Rolled hit! You strike ${enemy.name} for ${player.classDef.dmg} DMG.`, 'log-p-hit');
         if (enemy.hp <= 0) dmLog(`${enemy.name} is slain.`, 'log-sys');
       } else {
         dmLog(`Rolled miss! ${enemy.name} dodged your strike.`, 'log-p-miss');
@@ -491,79 +493,92 @@
   }
 
   // --- DRAWING ENGINE (SPRITES) ---
-  function drawHero(x, y) {
+  
+  function drawRogue(x, y) {
     const px = x * CELL;
     const py = y * CELL;
-    // Cape
-    ctx.fillStyle = '#1e3a8a'; ctx.fillRect(px+8, py+16, 24, 20);
-    // Head/Helm
-    ctx.fillStyle = '#cbd5e1'; ctx.fillRect(px+12, py+6, 16, 14);
-    // Visor slit
-    ctx.fillStyle = '#0f172a'; ctx.fillRect(px+14, py+10, 12, 4);
-    // Plume
-    ctx.fillStyle = '#3b82f6'; ctx.fillRect(px+16, py+2, 8, 4);
-    // Body Armor
-    ctx.fillStyle = '#94a3b8'; ctx.fillRect(px+10, y*CELL+20, 20, 16);
-    // Sword/Weapon
-    ctx.fillStyle = '#e2e8f0'; ctx.fillRect(px+28, py+10, 4, 18);
-    ctx.fillStyle = '#f59e0b'; ctx.fillRect(px+26, py+24, 8, 2); 
+    // Dark Cloak
+    ctx.fillStyle = '#111827'; ctx.fillRect(px+8, py+16, 24, 20);
+    // Hood
+    ctx.fillStyle = '#1f2937'; ctx.fillRect(px+12, py+6, 16, 14);
+    // Face shadow
+    ctx.fillStyle = '#030712'; ctx.fillRect(px+14, py+10, 12, 6);
+    // Red eyes peering out
+    ctx.fillStyle = '#ef4444'; ctx.fillRect(px+16, py+12, 2, 2); ctx.fillRect(px+22, py+12, 2, 2);
+    // Body (Leather)
+    ctx.fillStyle = '#451a03'; ctx.fillRect(px+12, py+20, 16, 16);
+    // Dagger
+    ctx.fillStyle = '#94a3b8'; ctx.fillRect(px+28, py+16, 2, 10);
+    ctx.fillStyle = '#fbbf24'; ctx.fillRect(px+26, py+26, 6, 2);
+  }
+
+  function drawKnight(x, y) {
+    const px = x * CELL;
+    const py = y * CELL;
+    ctx.fillStyle = '#1e3a8a'; ctx.fillRect(px+8, py+16, 24, 20); // Cape
+    ctx.fillStyle = '#cbd5e1'; ctx.fillRect(px+12, py+6, 16, 14); // Helm
+    ctx.fillStyle = '#0f172a'; ctx.fillRect(px+14, py+10, 12, 4); // Visor
+    ctx.fillStyle = '#3b82f6'; ctx.fillRect(px+16, py+2, 8, 4); // Plume
+    ctx.fillStyle = '#94a3b8'; ctx.fillRect(px+10, py+20, 20, 16); // Armor
+    ctx.fillStyle = '#e2e8f0'; ctx.fillRect(px+28, py+10, 4, 18); // Sword
+    ctx.fillStyle = '#f59e0b'; ctx.fillRect(px+26, py+24, 8, 2); // Hilt
+  }
+
+  function drawBerserker(x, y) {
+    const px = x * CELL;
+    const py = y * CELL;
+    // Fur cloak
+    ctx.fillStyle = '#451a03'; ctx.fillRect(px+6, py+14, 28, 22);
+    // Head
+    ctx.fillStyle = '#fca5a5'; ctx.fillRect(px+12, py+6, 16, 14);
+    // Horned Helm
+    ctx.fillStyle = '#475569'; ctx.fillRect(px+10, py+2, 20, 6);
+    ctx.fillStyle = '#e2e8f0'; ctx.fillRect(px+6, py+0, 4, 8); ctx.fillRect(px+30, py+0, 4, 8);
+    // Body (Bare chest)
+    ctx.fillStyle = '#fca5a5'; ctx.fillRect(px+10, py+20, 20, 16);
+    ctx.fillStyle = '#3b82f6'; ctx.fillRect(px+14, py+22, 12, 4); // War paint
+    // Heavy Axe
+    ctx.fillStyle = '#78350f'; ctx.fillRect(px+32, py+8, 4, 26); // Handle
+    ctx.fillStyle = '#cbd5e1'; ctx.fillRect(px+34, py+10, 8, 14); // Outer blade
+    ctx.fillRect(px+28, py+12, 4, 10); // Inner blade
   }
 
   function drawGoblin(x, y) {
     const px = x * CELL;
     const py = y * CELL;
-    // Ears
-    ctx.fillStyle = '#22c55e'; 
-    ctx.fillRect(px+4, py+14, 8, 4); // Left
-    ctx.fillRect(px+28, py+14, 8, 4); // Right
-    // Head
-    ctx.fillRect(px+12, py+10, 16, 14);
-    // Eyes
-    ctx.fillStyle = '#000'; ctx.fillRect(px+14, py+14, 4, 4); ctx.fillRect(px+22, py+14, 4, 4);
+    ctx.fillStyle = '#22c55e'; ctx.fillRect(px+4, py+14, 8, 4); ctx.fillRect(px+28, py+14, 8, 4); // Ears
+    ctx.fillStyle = '#22c55e'; ctx.fillRect(px+12, py+10, 16, 14); // Head
+    ctx.fillStyle = '#000'; ctx.fillRect(px+14, py+14, 4, 4); ctx.fillRect(px+22, py+14, 4, 4); // Eyes
     ctx.fillStyle = '#fff'; ctx.fillRect(px+14, py+14, 2, 2); ctx.fillRect(px+22, py+14, 2, 2);
-    // Tunic
-    ctx.fillStyle = '#78350f'; ctx.fillRect(px+10, py+24, 20, 12);
-    // Tiny Dagger
-    ctx.fillStyle = '#94a3b8'; ctx.fillRect(px+6, py+20, 2, 10);
+    ctx.fillStyle = '#78350f'; ctx.fillRect(px+10, py+24, 20, 12); // Tunic
+    ctx.fillStyle = '#94a3b8'; ctx.fillRect(px+6, py+20, 2, 10); // Dagger
   }
 
   function drawOrc(x, y) {
     const px = x * CELL;
     const py = y * CELL;
-    // Big Body / Armor
-    ctx.fillStyle = '#1e293b'; ctx.fillRect(px+6, py+16, 28, 22);
-    // Head
-    ctx.fillStyle = '#166534'; ctx.fillRect(px+12, py+6, 16, 14);
-    // Tusks
-    ctx.fillStyle = '#fff'; ctx.fillRect(px+14, py+18, 2, 4); ctx.fillRect(px+24, py+18, 2, 4);
-    // Red Eyes
-    ctx.fillStyle = '#ef4444'; ctx.fillRect(px+14, py+10, 4, 2); ctx.fillRect(px+22, py+10, 4, 2);
-    // Heavy Axe
-    ctx.fillStyle = '#78350f'; ctx.fillRect(px+30, py+8, 4, 26); // Handle
-    ctx.fillStyle = '#cbd5e1'; ctx.fillRect(px+32, py+12, 6, 12); // Blade
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(px+6, py+16, 28, 22); // Armor
+    ctx.fillStyle = '#166534'; ctx.fillRect(px+12, py+6, 16, 14); // Head
+    ctx.fillStyle = '#fff'; ctx.fillRect(px+14, py+18, 2, 4); ctx.fillRect(px+24, py+18, 2, 4); // Tusks
+    ctx.fillStyle = '#ef4444'; ctx.fillRect(px+14, py+10, 4, 2); ctx.fillRect(px+22, py+10, 4, 2); // Eyes
+    ctx.fillStyle = '#78350f'; ctx.fillRect(px+30, py+8, 4, 26); // Axe handle
+    ctx.fillStyle = '#cbd5e1'; ctx.fillRect(px+32, py+12, 6, 12); // Axe blade
   }
 
   function drawDoor(x, y) {
     const px = x * CELL;
     const py = y * CELL;
-    // Archway background
     ctx.fillStyle = '#292524'; ctx.fillRect(px+4, py+4, 32, 36);
-    // Wooden planks
     ctx.fillStyle = '#5c3a21'; ctx.fillRect(px+6, py+6, 28, 34);
-    // Planks lines
     ctx.fillStyle = '#45280f'; ctx.fillRect(px+14, py+6, 2, 34); ctx.fillRect(px+24, py+6, 2, 34);
-    // Iron bands
     ctx.fillStyle = '#111'; ctx.fillRect(px+6, py+12, 28, 4); ctx.fillRect(px+6, py+28, 28, 4);
-    // Handle
     ctx.fillStyle = '#fbbf24'; ctx.fillRect(px+26, py+20, 4, 4);
   }
 
   function drawStairs(x, y) {
     const px = x * CELL;
     const py = y * CELL;
-    // Base hole
     ctx.fillStyle = '#1e1b4b'; ctx.fillRect(px+4, py+4, 32, 32);
-    // Steps descending
     ctx.fillStyle = '#a855f7'; ctx.fillRect(px+8, py+8, 24, 8);
     ctx.fillStyle = '#9333ea'; ctx.fillRect(px+12, py+16, 16, 8);
     ctx.fillStyle = '#7e22ce'; ctx.fillRect(px+16, py+24, 8, 8);
@@ -575,15 +590,14 @@
     ctx.fillStyle = '#333'; ctx.fillRect(px, py, CELL, CELL);
     ctx.fillStyle = '#444'; 
     ctx.fillRect(px+2, py+2, 16, 16); ctx.fillRect(px+22, py+2, 16, 16);
-    ctx.fillRect(px+2, py+22, 36, 16); // offset brick
+    ctx.fillRect(px+2, py+22, 36, 16);
     ctx.fillStyle = '#222';
-    ctx.fillRect(px, py+18, CELL, 2); // mortar line
+    ctx.fillRect(px, py+18, CELL, 2);
   }
 
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Floor Grid
     ctx.strokeStyle = '#222';
     for (let i = 0; i < COLS; i++) {
       for (let j = 0; j < ROWS; j++) {
@@ -600,7 +614,6 @@
         if (e.type === 'orc') drawOrc(e.x, e.y);
         else drawGoblin(e.x, e.y);
         
-        // HP Bar
         ctx.fillStyle = '#ef4444';
         ctx.fillRect(e.x * CELL + 4, e.y * CELL - 2, CELL - 8, 3);
         ctx.fillStyle = '#22c55e';
@@ -608,11 +621,12 @@
       }
     });
 
-    if (player.hp > 0) {
-      drawHero(player.x, player.y);
+    if (player.hp > 0 && player.classId) {
+      if (player.classId === 'rogue') drawRogue(player.x, player.y);
+      else if (player.classId === 'knight') drawKnight(player.x, player.y);
+      else if (player.classId === 'berserker') drawBerserker(player.x, player.y);
     }
   }
-
 </script>
 </body>
 </html>
