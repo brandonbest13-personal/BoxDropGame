@@ -3,60 +3,604 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Coming Soon</title>
-
+  <title>Grid Crawler: Pixel Art Edition</title>
   <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; font-family: monospace; }
+    
     body {
-      width: 100%;
-      height: 100vh;
-      height: 100dvh;
-      background-color: #f1f5f9; /* Same slate-50 background */
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #111;
+      color: #eee;
       display: flex;
       justify-content: center;
       align-items: center;
-      padding: 20px;
+      height: 100vh;
+      overflow: hidden;
     }
 
-    .modal-card {
+    #app {
       width: 100%;
-      max-width: 360px;
-      background: #ffffff;
-      padding: 36px 24px;
-      border-radius: 20px;
-      border: 1px solid #cbd5e1;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+      max-width: 500px;
+      height: 100vh;
+      max-height: 800px;
+      background: #222;
+      border: 2px solid #555;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Start Screen */
+    #start-screen {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
       text-align: center;
+      background: #1a1a1a;
     }
 
-    h1 {
-      font-size: 1.8rem;
-      color: #16a34a; /* River Hopper green */
-      letter-spacing: 1px;
-      margin-bottom: 10px;
-      font-weight: 800;
+    .weapon-card {
+      background: #333;
+      border: 2px solid #555;
+      padding: 15px;
+      margin: 10px 0;
+      width: 100%;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    .weapon-card:hover { border-color: #3b82f6; background: #2a3b4c; }
+    .w-title { font-size: 18px; font-weight: bold; color: #3b82f6; margin-bottom: 5px; }
+    .w-desc { font-size: 12px; color: #aaa; }
+
+    /* Game UI */
+    #game-screen {
+      display: none;
+      flex-direction: column;
+      height: 100%;
     }
 
-    p.subtitle {
-      font-size: 0.95rem;
-      color: #475569;
-      line-height: 1.5;
-      font-weight: 500;
+    #hud {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px;
+      background: #111;
+      border-bottom: 2px solid #444;
+      font-size: 14px;
+      font-weight: bold;
     }
+    .hud-stat { color: #aaa; }
+    .val-hp { color: #22c55e; }
+    .val-ap { color: #eab308; }
+    .val-depth { color: #a855f7; }
+
+    #canvas-container {
+      flex: 1;
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      border-bottom: 2px solid #444;
+      position: relative;
+    }
+
+    canvas {
+      background: #1e1e1e;
+      box-shadow: 0 0 20px rgba(0,0,0,0.8);
+      cursor: crosshair;
+    }
+
+    /* Controls & Log */
+    #bottom-panel {
+      height: 180px;
+      display: flex;
+      flex-direction: column;
+      background: #111;
+    }
+
+    #log {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+      font-size: 11px;
+      line-height: 1.4;
+      color: #888;
+      border-bottom: 2px solid #333;
+    }
+    .log-sys { color: #a855f7; }
+    .log-p-hit { color: #3b82f6; font-weight: bold; }
+    .log-p-miss { color: #60a5fa; }
+    .log-e-hit { color: #ef4444; font-weight: bold; }
+    .log-e-miss { color: #f87171; }
+    .log-warn { color: #eab308; }
+
+    #btn-end-turn {
+      padding: 15px;
+      background: #333;
+      color: #eee;
+      border: none;
+      font-weight: bold;
+      font-size: 14px;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+    #btn-end-turn:hover { background: #444; }
+    #btn-end-turn:disabled { opacity: 0.5; cursor: not-allowed; }
+
   </style>
 </head>
 <body>
 
-  <div class="modal-card">
-    <h1>STAY TUNED</h1>
-    <p class="subtitle">A new version is coming soon!</p>
+<div id="app">
+  <div id="start-screen">
+    <h1 style="color:#eab308; margin-bottom: 20px;">GRID CRAWLER</h1>
+    <p style="font-size:12px; color:#aaa; margin-bottom: 20px;">Choose your loadout. Tap adjacent tiles to move/attack.</p>
+    
+    <div class="weapon-card" data-w="dagger">
+      <div class="w-title">Rogue's Dagger</div>
+      <div class="w-desc">1 AP to Attack | 1 DMG<br>Fast, allows hit-and-run tactics.</div>
+    </div>
+    <div class="weapon-card" data-w="sword">
+      <div class="w-title">Knight's Sword</div>
+      <div class="w-desc">2 AP to Attack | 3 DMG<br>Balanced damage and mobility.</div>
+    </div>
+    <div class="weapon-card" data-w="axe">
+      <div class="w-title">Berserker's Axe</div>
+      <div class="w-desc">3 AP to Attack | 4 DMG (Cleave)<br>Hits ALL adjacent enemies. No AP left to move.</div>
+    </div>
   </div>
 
+  <div id="game-screen">
+    <div id="hud">
+      <div class="hud-stat">HP: <span id="ui-hp" class="val-hp">20/20</span></div>
+      <div class="hud-stat">AP: <span id="ui-ap" class="val-ap">3/3</span></div>
+      <div class="hud-stat">LVL: <span id="ui-depth" class="val-depth">1</span></div>
+    </div>
+    
+    <div id="canvas-container">
+      <canvas id="gameCanvas" width="400" height="400"></canvas>
+    </div>
+    
+    <div id="bottom-panel">
+      <div id="log"></div>
+      <button id="btn-end-turn">End Turn</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const COLS = 10;
+  const ROWS = 10;
+  const CELL = 40;
+
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const els = {
+    start: document.getElementById('start-screen'),
+    game: document.getElementById('game-screen'),
+    hp: document.getElementById('ui-hp'),
+    ap: document.getElementById('ui-ap'),
+    depth: document.getElementById('ui-depth'),
+    log: document.getElementById('log'),
+    btnEnd: document.getElementById('btn-end-turn')
+  };
+
+  // --- GAME STATE ---
+  let player = { x: 0, y: 0, hp: 20, maxHp: 20, ap: 3, maxAp: 3, weapon: null };
+  let depth = 1;
+  let entities = [];
+  let walls = [];
+  let doors = [];
+  let stairs = null;
+  let isPlayerTurn = true;
+
+  const WEAPONS = {
+    dagger: { cost: 1, dmg: 1, name: "Dagger", cleave: false },
+    sword:  { cost: 2, dmg: 3, name: "Sword", cleave: false },
+    axe:    { cost: 3, dmg: 4, name: "Axe", cleave: true }
+  };
+
+  // --- INITIALIZATION ---
+  document.querySelectorAll('.weapon-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      player.weapon = WEAPONS[e.currentTarget.dataset.w];
+      els.start.style.display = 'none';
+      els.game.style.display = 'flex';
+      generateRoom(true); 
+    });
+  });
+
+  function dmLog(msg, type = '') {
+    const div = document.createElement('div');
+    div.className = type;
+    div.innerText = msg;
+    els.log.appendChild(div);
+    els.log.scrollTop = els.log.scrollHeight;
+  }
+
+  function updateHUD() {
+    els.hp.innerText = `${player.hp}/${player.maxHp}`;
+    els.ap.innerText = `${player.ap}/${player.maxAp}`;
+    els.depth.innerText = depth;
+    els.btnEnd.disabled = !isPlayerTurn;
+  }
+
+  // --- MAP GENERATION ---
+  function generateRoom(isNewDepth = false) {
+    if (isNewDepth) {
+      if (depth > 1) {
+        const heal = 5;
+        player.hp = Math.min(player.maxHp, player.hp + heal);
+        dmLog(`You descend the stairs. Restored ${heal} HP.`, 'log-sys');
+      } else {
+        dmLog(`You enter the dungeon with your ${player.weapon.name}.`, 'log-sys');
+      }
+    } else {
+      dmLog(`You push through the heavy door into a new room.`, 'log-sys');
+    }
+
+    player.ap = player.maxAp;
+    isPlayerTurn = true;
+    entities = [];
+    walls = [];
+    doors = [];
+    stairs = null;
+
+    player.x = 4; player.y = 4;
+
+    for (let i = 0; i < 15; i++) {
+      let wx = Math.floor(Math.random() * COLS);
+      let wy = Math.floor(Math.random() * ROWS);
+      if (getDist(player.x, player.y, wx, wy) > 2) walls.push({x: wx, y: wy});
+    }
+
+    const numEnemies = Math.min(6, 1 + Math.floor(depth / 2) + Math.floor(Math.random() * 2));
+    for (let i = 0; i < numEnemies; i++) {
+      let ex, ey;
+      do {
+        ex = Math.floor(Math.random() * COLS);
+        ey = Math.floor(Math.random() * ROWS);
+      } while (getDist(player.x, player.y, ex, ey) < 3 || isWall(ex, ey));
+
+      if (depth >= 3 && Math.random() > 0.6) {
+        entities.push({ type: 'orc', x: ex, y: ey, hp: 8, maxHp: 8, ap: 2, maxAp: 2, dmg: 3, name: 'Orc' });
+      } else {
+        entities.push({ type: 'goblin', x: ex, y: ey, hp: 4, maxHp: 4, ap: 4, maxAp: 4, dmg: 1, name: 'Goblin' });
+      }
+    }
+
+    if (Math.random() < 0.3) {
+      let sx, sy;
+      do {
+        sx = Math.floor(Math.random() * COLS);
+        sy = Math.floor(Math.random() * ROWS);
+      } while (getDist(player.x, player.y, sx, sy) < 4 || isWall(sx, sy));
+      stairs = { x: sx, y: sy };
+    } else {
+      const numDoors = Math.floor(Math.random() * 3) + 1;
+      for (let i = 0; i < numDoors; i++) {
+        let dx, dy;
+        do {
+          if (Math.random() > 0.5) {
+            dx = Math.random() > 0.5 ? 0 : COLS-1;
+            dy = Math.floor(Math.random() * ROWS);
+          } else {
+            dx = Math.floor(Math.random() * COLS);
+            dy = Math.random() > 0.5 ? 0 : ROWS-1;
+          }
+        } while (isWall(dx, dy) || isDoor(dx, dy));
+        doors.push({ x: dx, y: dy });
+      }
+    }
+
+    updateHUD();
+    draw();
+  }
+
+  function getDist(x1, y1, x2, y2) { return Math.abs(x1 - x2) + Math.abs(y1 - y2); }
+  function isWall(x, y) { return walls.some(w => w.x === x && w.y === y); }
+  function isDoor(x, y) { return doors.some(d => d.x === x && d.y === y); }
+  function getEnemyAt(x, y) { return entities.find(e => e.x === x && e.y === y && e.hp > 0); }
+  
+  function rollHit(baseChance) {
+    return (Math.floor(Math.random() * 100) + 1) <= baseChance;
+  }
+
+  // --- COMBAT & MOVEMENT ---
+  function executePlayerAttack(targetX, targetY) {
+    if (player.ap < player.weapon.cost) {
+      dmLog(`Not enough AP to swing ${player.weapon.name}. (Needs ${player.weapon.cost})`, 'log-warn');
+      return;
+    }
+    player.ap -= player.weapon.cost;
+    
+    let targets = [];
+    if (player.weapon.cleave) {
+      const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+      dirs.forEach(d => {
+        const t = getEnemyAt(player.x + d[0], player.y + d[1]);
+        if (t) targets.push(t);
+      });
+      dmLog(`You swing the Axe in a wide arc!`, 'log-p-hit');
+    } else {
+      targets.push(getEnemyAt(targetX, targetY));
+    }
+
+    targets.forEach(enemy => {
+      if (rollHit(70)) {
+        enemy.hp -= player.weapon.dmg;
+        dmLog(`Rolled hit! You strike ${enemy.name} for ${player.weapon.dmg} DMG.`, 'log-p-hit');
+        if (enemy.hp <= 0) dmLog(`${enemy.name} is slain.`, 'log-sys');
+      } else {
+        dmLog(`Rolled miss! ${enemy.name} dodged your strike.`, 'log-p-miss');
+      }
+    });
+
+    updateHUD();
+    draw();
+    if (player.ap === 0) setTimeout(endPlayerTurn, 500);
+  }
+
+  function handleZoneOfControl() {
+    const adjacentEnemies = entities.filter(e => e.hp > 0 && getDist(player.x, player.y, e.x, e.y) === 1);
+    adjacentEnemies.forEach(e => {
+      dmLog(`Opportunity Attack! ${e.name} swipes as you move away.`, 'log-warn');
+      if (rollHit(60)) {
+        player.hp -= e.dmg;
+        dmLog(`${e.name} hits you for ${e.dmg} DMG!`, 'log-e-hit');
+      } else {
+        dmLog(`You deftly evade the opportunity attack.`, 'log-e-miss');
+      }
+    });
+  }
+
+  // --- PLAYER INPUT ---
+  canvas.addEventListener('mousedown', (e) => {
+    if (!isPlayerTurn || player.hp <= 0) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const cx = Math.floor((e.clientX - rect.left) / CELL);
+    const cy = Math.floor((e.clientY - rect.top) / CELL);
+
+    if (getDist(player.x, player.y, cx, cy) === 1) {
+      const enemy = getEnemyAt(cx, cy);
+      
+      if (enemy) {
+        executePlayerAttack(cx, cy);
+      } else if (!isWall(cx, cy)) {
+        if (player.ap >= 1) {
+          handleZoneOfControl();
+          
+          if (player.hp > 0) {
+            player.x = cx;
+            player.y = cy;
+            player.ap -= 1;
+            
+            if (stairs && player.x === stairs.x && player.y === stairs.y) {
+              depth++;
+              generateRoom(true);
+              return;
+            } else if (isDoor(player.x, player.y)) {
+              generateRoom(false);
+              return;
+            }
+
+            updateHUD();
+            draw();
+            if (player.ap === 0) setTimeout(endPlayerTurn, 500);
+          } else {
+            checkPlayerDeath();
+          }
+        }
+      }
+    }
+  });
+
+  els.btnEnd.addEventListener('click', endPlayerTurn);
+
+  function endPlayerTurn() {
+    if (!isPlayerTurn || player.hp <= 0) return;
+    isPlayerTurn = false;
+    updateHUD();
+    
+    let delay = 300;
+    entities.filter(e => e.hp > 0).forEach((enemy, i) => {
+      setTimeout(() => { executeEnemyTurn(enemy); }, delay * (i + 1));
+    });
+
+    const totalDelay = (entities.filter(e=>e.hp>0).length + 1) * delay;
+    setTimeout(() => {
+      if (player.hp > 0) {
+        player.ap = player.maxAp;
+        isPlayerTurn = true;
+        updateHUD();
+      }
+    }, totalDelay);
+  }
+
+  function executeEnemyTurn(enemy) {
+    if (enemy.hp <= 0 || player.hp <= 0) return;
+    enemy.ap = enemy.maxAp;
+
+    let attempts = 0;
+    while (enemy.ap > 0 && attempts < 5) {
+      attempts++;
+      if (getDist(enemy.x, enemy.y, player.x, player.y) === 1) {
+        if (enemy.ap >= 2) { 
+          enemy.ap -= 2;
+          if (rollHit(65)) {
+            player.hp -= enemy.dmg;
+            dmLog(`${enemy.name} strikes you for ${enemy.dmg} DMG!`, 'log-e-hit');
+            checkPlayerDeath();
+          } else {
+            dmLog(`${enemy.name} attacks but misses.`, 'log-e-miss');
+          }
+        } else {
+          enemy.ap = 0; 
+        }
+      } else {
+        const dx = player.x - enemy.x;
+        const dy = player.y - enemy.y;
+        let moveX = enemy.x;
+        let moveY = enemy.y;
+
+        if (Math.abs(dx) > Math.abs(dy)) {
+          moveX += Math.sign(dx);
+          if (isWall(moveX, moveY) || getEnemyAt(moveX, moveY) || isDoor(moveX, moveY) || (stairs && moveX===stairs.x && moveY===stairs.y)) {
+            moveX = enemy.x; moveY += Math.sign(dy || 1);
+          }
+        } else {
+          moveY += Math.sign(dy);
+          if (isWall(moveX, moveY) || getEnemyAt(moveX, moveY) || isDoor(moveX, moveY) || (stairs && moveX===stairs.x && moveY===stairs.y)) {
+            moveY = enemy.y; moveX += Math.sign(dx || 1);
+          }
+        }
+
+        if (!isWall(moveX, moveY) && !getEnemyAt(moveX, moveY) && !isDoor(moveX, moveY)) {
+          enemy.x = moveX;
+          enemy.y = moveY;
+          enemy.ap -= 1;
+        } else {
+          enemy.ap = 0; 
+        }
+      }
+    }
+    updateHUD();
+    draw();
+  }
+
+  function checkPlayerDeath() {
+    updateHUD();
+    if (player.hp <= 0) {
+      dmLog(`YOU HAVE FALLEN AT DEPTH ${depth}.`, 'log-sys');
+      isPlayerTurn = false;
+      els.btnEnd.disabled = true;
+    }
+  }
+
+  // --- DRAWING ENGINE (SPRITES) ---
+  function drawHero(x, y) {
+    const px = x * CELL;
+    const py = y * CELL;
+    // Cape
+    ctx.fillStyle = '#1e3a8a'; ctx.fillRect(px+8, py+16, 24, 20);
+    // Head/Helm
+    ctx.fillStyle = '#cbd5e1'; ctx.fillRect(px+12, py+6, 16, 14);
+    // Visor slit
+    ctx.fillStyle = '#0f172a'; ctx.fillRect(px+14, py+10, 12, 4);
+    // Plume
+    ctx.fillStyle = '#3b82f6'; ctx.fillRect(px+16, py+2, 8, 4);
+    // Body Armor
+    ctx.fillStyle = '#94a3b8'; ctx.fillRect(px+10, y*CELL+20, 20, 16);
+    // Sword/Weapon
+    ctx.fillStyle = '#e2e8f0'; ctx.fillRect(px+28, py+10, 4, 18);
+    ctx.fillStyle = '#f59e0b'; ctx.fillRect(px+26, py+24, 8, 2); 
+  }
+
+  function drawGoblin(x, y) {
+    const px = x * CELL;
+    const py = y * CELL;
+    // Ears
+    ctx.fillStyle = '#22c55e'; 
+    ctx.fillRect(px+4, py+14, 8, 4); // Left
+    ctx.fillRect(px+28, py+14, 8, 4); // Right
+    // Head
+    ctx.fillRect(px+12, py+10, 16, 14);
+    // Eyes
+    ctx.fillStyle = '#000'; ctx.fillRect(px+14, py+14, 4, 4); ctx.fillRect(px+22, py+14, 4, 4);
+    ctx.fillStyle = '#fff'; ctx.fillRect(px+14, py+14, 2, 2); ctx.fillRect(px+22, py+14, 2, 2);
+    // Tunic
+    ctx.fillStyle = '#78350f'; ctx.fillRect(px+10, py+24, 20, 12);
+    // Tiny Dagger
+    ctx.fillStyle = '#94a3b8'; ctx.fillRect(px+6, py+20, 2, 10);
+  }
+
+  function drawOrc(x, y) {
+    const px = x * CELL;
+    const py = y * CELL;
+    // Big Body / Armor
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(px+6, py+16, 28, 22);
+    // Head
+    ctx.fillStyle = '#166534'; ctx.fillRect(px+12, py+6, 16, 14);
+    // Tusks
+    ctx.fillStyle = '#fff'; ctx.fillRect(px+14, py+18, 2, 4); ctx.fillRect(px+24, py+18, 2, 4);
+    // Red Eyes
+    ctx.fillStyle = '#ef4444'; ctx.fillRect(px+14, py+10, 4, 2); ctx.fillRect(px+22, py+10, 4, 2);
+    // Heavy Axe
+    ctx.fillStyle = '#78350f'; ctx.fillRect(px+30, py+8, 4, 26); // Handle
+    ctx.fillStyle = '#cbd5e1'; ctx.fillRect(px+32, py+12, 6, 12); // Blade
+  }
+
+  function drawDoor(x, y) {
+    const px = x * CELL;
+    const py = y * CELL;
+    // Archway background
+    ctx.fillStyle = '#292524'; ctx.fillRect(px+4, py+4, 32, 36);
+    // Wooden planks
+    ctx.fillStyle = '#5c3a21'; ctx.fillRect(px+6, py+6, 28, 34);
+    // Planks lines
+    ctx.fillStyle = '#45280f'; ctx.fillRect(px+14, py+6, 2, 34); ctx.fillRect(px+24, py+6, 2, 34);
+    // Iron bands
+    ctx.fillStyle = '#111'; ctx.fillRect(px+6, py+12, 28, 4); ctx.fillRect(px+6, py+28, 28, 4);
+    // Handle
+    ctx.fillStyle = '#fbbf24'; ctx.fillRect(px+26, py+20, 4, 4);
+  }
+
+  function drawStairs(x, y) {
+    const px = x * CELL;
+    const py = y * CELL;
+    // Base hole
+    ctx.fillStyle = '#1e1b4b'; ctx.fillRect(px+4, py+4, 32, 32);
+    // Steps descending
+    ctx.fillStyle = '#a855f7'; ctx.fillRect(px+8, py+8, 24, 8);
+    ctx.fillStyle = '#9333ea'; ctx.fillRect(px+12, py+16, 16, 8);
+    ctx.fillStyle = '#7e22ce'; ctx.fillRect(px+16, py+24, 8, 8);
+  }
+
+  function drawWall(x, y) {
+    const px = x * CELL;
+    const py = y * CELL;
+    ctx.fillStyle = '#333'; ctx.fillRect(px, py, CELL, CELL);
+    ctx.fillStyle = '#444'; 
+    ctx.fillRect(px+2, py+2, 16, 16); ctx.fillRect(px+22, py+2, 16, 16);
+    ctx.fillRect(px+2, py+22, 36, 16); // offset brick
+    ctx.fillStyle = '#222';
+    ctx.fillRect(px, py+18, CELL, 2); // mortar line
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Floor Grid
+    ctx.strokeStyle = '#222';
+    for (let i = 0; i < COLS; i++) {
+      for (let j = 0; j < ROWS; j++) {
+        ctx.strokeRect(i * CELL, j * CELL, CELL, CELL);
+      }
+    }
+
+    walls.forEach(w => drawWall(w.x, w.y));
+    doors.forEach(d => drawDoor(d.x, d.y));
+    if (stairs) drawStairs(stairs.x, stairs.y);
+
+    entities.forEach(e => {
+      if (e.hp > 0) {
+        if (e.type === 'orc') drawOrc(e.x, e.y);
+        else drawGoblin(e.x, e.y);
+        
+        // HP Bar
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(e.x * CELL + 4, e.y * CELL - 2, CELL - 8, 3);
+        ctx.fillStyle = '#22c55e';
+        ctx.fillRect(e.x * CELL + 4, e.y * CELL - 2, (e.hp/e.maxHp) * (CELL-8), 3);
+      }
+    });
+
+    if (player.hp > 0) {
+      drawHero(player.x, player.y);
+    }
+  }
+
+</script>
 </body>
 </html>
